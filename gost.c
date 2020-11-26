@@ -24,4 +24,49 @@ DEFINE_DIGEST(gosthash, "md_gost94")
 DEFINE_DIGEST(stribog_256, "md_gost12_256")
 DEFINE_DIGEST(stribog_512, "md_gost12_512")
 
+#define DEFINE_CIPHER(name, algo)				\
+const EVP_CIPHER *						\
+EVP_##name(void)						\
+{								\
+	return EVP_get_cipherbyname(algo);			\
+}
+
+DEFINE_CIPHER(gost89_cbc, "gost89-cbc")
+DEFINE_CIPHER(gost89_cfb, "gost89")      /* CFB + key meshing        */
+DEFINE_CIPHER(gost89_cnt, "gost89-cnt")  /* OFB + key and IV meshing */
+DEFINE_CIPHER(gost89_ctr, "gost89-ctr")
+
+const EVP_CIPHER *
+EVP_gost89_ofb(void)  /* CNT + guarantee that we can turn off meshing */
+{
+	static const EVP_CIPHER *algo;
+	EVP_CIPHER_CTX *c;
+
+	if (algo != NULL)
+		return algo;
+
+	if ((algo = EVP_gost89_cnt()) == NULL)
+		return NULL;
+
+	if ((c = EVP_CIPHER_CTX_new()) == NULL)
+		goto no_ctx;
+
+	if (!EVP_CipherInit (c, algo, NULL, NULL, 1) ||
+	    EVP_CIPHER_CTX_ctrl(c, EVP_CTRL_AEAD_SET_TAG, 1, "plain") <= 0)
+		goto no_plain;
+
+	EVP_CIPHER_CTX_free(c);
+	return algo;
+no_plain:
+	EVP_CIPHER_CTX_free(c);
+no_ctx:
+	algo = NULL;
+	return NULL;
+}
+
+DEFINE_CIPHER(kuznechik_cbc, "grasshopper-cbc")
+DEFINE_CIPHER(kuznechik_cfb, "grasshopper-cfb")
+DEFINE_CIPHER(kuznechik_ctr, "grasshopper-ctr")
+DEFINE_CIPHER(kuznechik_ofb, "grasshopper-ofb")
+
 #endif  /* WITH_OPENSSL */

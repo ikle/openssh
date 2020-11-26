@@ -44,6 +44,7 @@
 #include <stdio.h>
 
 #include "cipher.h"
+#include "gost.h"
 #include "misc.h"
 #include "sshbuf.h"
 #include "ssherr.h"
@@ -75,6 +76,7 @@ struct sshcipher {
 #define CFLAG_CHACHAPOLY	(1<<1)
 #define CFLAG_AESCTR		(1<<2)
 #define CFLAG_NONE		(1<<3)
+#define CFLAG_PLAIN		(1<<4)     /* request plain cipher mode    */
 #define CFLAG_INTERNAL		CFLAG_NONE /* Don't use "none" for packets */
 #ifdef WITH_OPENSSL
 	const EVP_CIPHER	*(*evptype)(void);
@@ -102,6 +104,14 @@ static const struct sshcipher ciphers[] = {
 	{ "aes256-gcm@openssh.com",
 				16, 32, 12, 16, 0, EVP_aes_256_gcm },
 # endif /* OPENSSL_HAVE_EVPGCM */
+	{ "gost89-cbc",		8,  32, 0, 0, CFLAG_CBC,   EVP_gost89_cbc },
+	{ "gost89-cfb",		8,  32, 0, 0, CFLAG_PLAIN, EVP_gost89_cfb },
+	{ "gost89-ctr",		8,  32, 0, 0,           0, EVP_gost89_ctr },
+	{ "gost89-ofb",		8,  32, 0, 0, CFLAG_PLAIN, EVP_gost89_ofb },
+	{ "kuznechik-cbc",	16, 32, 0, 0, CFLAG_CBC,   EVP_kuznechik_cbc },
+	{ "kuznechik-cfb",	16, 32, 0, 0,           0, EVP_kuznechik_cfb },
+	{ "kuznechik-ctr",	16, 32, 0, 0,           0, EVP_kuznechik_ctr },
+	{ "kuznechik-ofb",	16, 32, 0, 0,           0, EVP_kuznechik_ofb },
 #else
 	{ "aes128-ctr",		16, 16, 0, 0, CFLAG_AESCTR, NULL },
 	{ "aes192-ctr",		16, 24, 0, 0, CFLAG_AESCTR, NULL },
@@ -329,6 +339,11 @@ cipher_init(struct sshcipher_ctx **ccp, const struct sshcipher *cipher,
 	if (EVP_CipherInit(cc->evp, NULL, (u_char *)key, NULL, -1) == 0) {
 		ret = SSH_ERR_LIBCRYPTO_ERROR;
 		goto out;
+	}
+	if ((cc->cipher->flags & CFLAG_PLAIN) != 0) {
+		/* NOTE: no need to check status */
+		EVP_CIPHER_CTX_ctrl(cc->evp, EVP_CTRL_KEY_MESH, 0, NULL);
+		EVP_CIPHER_CTX_ctrl(cc->evp, EVP_CTRL_AEAD_SET_TAG, 1, "plain");
 	}
 	ret = 0;
 #endif /* WITH_OPENSSL */
