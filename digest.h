@@ -27,7 +27,10 @@
 #define SSH_DIGEST_SHA256	2
 #define SSH_DIGEST_SHA384	3
 #define SSH_DIGEST_SHA512	4
-#define SSH_DIGEST_MAX		5
+#define SSH_DIGEST_GOSTHASH	5
+#define SSH_DIGEST_STRIBOG_256	6
+#define SSH_DIGEST_STRIBOG_512	7
+#define SSH_DIGEST_MAX		8
 
 struct sshbuf;
 struct ssh_digest_ctx;

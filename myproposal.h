@@ -74,6 +74,8 @@
 	"umac-128@openssh.com," \
 	"hmac-sha2-256," \
 	"hmac-sha2-512," \
+	"hmac-stribog-256," \
+	"hmac-stribog-512," \
 	"hmac-sha1"
 
 #define KEX_CLIENT_MAC KEX_SERVER_MAC
