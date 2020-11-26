@@ -79,6 +79,24 @@ static const struct macalg macs[] = {
 	{ NULL,					0, 0, 0, 0, 0, 0 }
 };
 
+/*
+ * The algorithm may be provided by an engine, so it may not be available
+ * in the current configuration. Returns non-zero if available.
+ */
+static int
+mac_alg_available(const struct macalg *m)
+{
+	switch (m->type) {
+	case SSH_DIGEST:
+		return ssh_digest_alg_name(m->alg) != NULL;
+	case SSH_UMAC:
+	case SSH_UMAC128:
+		return 1;  /* UMAC compiled-in, assume AES is available */
+	}
+
+	return 0;
+}
+
 /* Returns a list of supported MACs separated by the specified char. */
 char *
 mac_alg_list(char sep)
@@ -88,6 +106,8 @@ mac_alg_list(char sep)
 	const struct macalg *m;
 
 	for (m = macs; m->name != NULL; m++) {
+		if (!mac_alg_available(m))
+			continue;
 		if (ret != NULL)
 			ret[rlen++] = sep;
 		nlen = strlen(m->name);

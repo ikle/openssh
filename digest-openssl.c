@@ -64,6 +64,16 @@ const struct ssh_digest digests[] = {
 	{ -1,			NULL,		0,	NULL },
 };
 
+/*
+ * The algorithm may be provided by an engine, so it may not be available
+ * in the current configuration. Returns non-zero if available.
+ */
+static int
+ssh_digest_available(const struct ssh_digest *d)
+{
+	return d->mdfunc() != NULL;
+}
+
 static const struct ssh_digest *
 ssh_digest_by_alg(int alg)
 {
@@ -73,7 +83,8 @@ ssh_digest_by_alg(int alg)
 		return NULL;
 	if (digests[alg].mdfunc == NULL)
 		return NULL;
-	return &(digests[alg]);
+
+	return ssh_digest_available(digests + alg) ? digests + alg : NULL;
 }
 
 int

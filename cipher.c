@@ -116,6 +116,16 @@ static const struct sshcipher ciphers[] = {
 
 /*--*/
 
+/*
+ * The algorithm may be provided by an engine, so it may not be available
+ * in the current configuration. Returns non-zero if available.
+ */
+static int
+cipher_available(const struct sshcipher *c)
+{
+	return c->evptype == NULL || c->evptype() != NULL;
+}
+
 /* Returns a comma-separated list of supported ciphers. */
 char *
 cipher_alg_list(char sep, int auth_only)
@@ -128,6 +138,8 @@ cipher_alg_list(char sep, int auth_only)
 		if ((c->flags & CFLAG_INTERNAL) != 0)
 			continue;
 		if (auth_only && c->auth_len == 0)
+			continue;
+		if (!cipher_available(c))
 			continue;
 		if (ret != NULL)
 			ret[rlen++] = sep;

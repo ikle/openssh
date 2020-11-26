@@ -40,6 +40,7 @@
 #ifdef WITH_OPENSSL
 #include <openssl/crypto.h>
 #include <openssl/dh.h>
+#include <openssl/ec.h>
 #endif
 
 #include "ssh.h"
@@ -134,6 +135,27 @@ static const struct kexalg gss_kexalgs[] = {
 	{ NULL, 0, -1, -1},
 };
 
+/*
+ * The algorithm may be provided by an engine, so it may not be available
+ * in the current configuration. Returns non-zero if available.
+ */
+static int
+kex_alg_available(const struct kexalg *k)
+{
+#ifdef WITH_OPENSSL
+	EC_KEY *key;
+
+	if (k->ec_nid > 0) {
+		key = EC_KEY_new_by_curve_name(k->ec_nid);
+		if (key == NULL)
+			return 0;
+
+		EC_KEY_free(key);
+	}
+#endif
+	return ssh_digest_alg_name(k->hash_alg) != NULL;
+}
+
 static char *
 kex_alg_list_internal(char sep, const struct kexalg *algs)
 {
@@ -142,6 +164,8 @@ kex_alg_list_internal(char sep, const struct kexalg *algs)
 	const struct kexalg *k;
 
 	for (k = algs; k->name != NULL; k++) {
+		if (!kex_alg_available(k))
+			continue;
 		if (ret != NULL)
 			ret[rlen++] = sep;
 		nlen = strlen(k->name);
