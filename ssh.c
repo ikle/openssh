@@ -1565,7 +1565,7 @@ main(int ac, char **av)
 	sensitive_data.nkeys = 0;
 	sensitive_data.keys = NULL;
 	if (options.hostbased_authentication) {
-		sensitive_data.nkeys = 10;
+		sensitive_data.nkeys = 12;
 		sensitive_data.keys = xcalloc(sensitive_data.nkeys,
 		    sizeof(struct sshkey));
 
@@ -1593,6 +1593,8 @@ main(int ac, char **av)
 			L_PUBKEY(_PATH_HOST_DSA_KEY_FILE, 7);
 			L_CERT(_PATH_HOST_XMSS_KEY_FILE, 8);
 			L_PUBKEY(_PATH_HOST_XMSS_KEY_FILE, 9);
+			L_CERT(_PATH_HOST_ECGOST_KEY_FILE, 10);
+			L_PUBKEY(_PATH_HOST_ECGOST_KEY_FILE, 11);
 		}
 	}
 

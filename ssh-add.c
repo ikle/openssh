@@ -80,6 +80,7 @@ static char *default_files[] = {
 #ifdef OPENSSL_HAS_ECC
 	_PATH_SSH_CLIENT_ID_ECDSA,
 	_PATH_SSH_CLIENT_ID_ECDSA_SK,
+	_PATH_SSH_CLIENT_ID_ECGOST,
 #endif
 #endif /* WITH_OPENSSL */
 	_PATH_SSH_CLIENT_ID_ED25519,

@@ -22,6 +22,8 @@
 #include <openssl/evp.h>
 #include <openssl/pem.h>
 #include "openbsd-compat/openssl-compat.h"
+
+#include "ssh-ecgost.h"
 #endif
 
 #ifdef HAVE_STDINT_H
@@ -86,6 +88,7 @@
 #define DEFAULT_BITS		3072
 #define DEFAULT_BITS_DSA	1024
 #define DEFAULT_BITS_ECDSA	256
+#define DEFAULT_BITS_ECGOST	256
 
 static int quiet = 0;
 
@@ -197,6 +200,12 @@ type_bits_valid(int type, const char *name, u_int32_t *bitsp)
 			if (*bitsp == 0)
 				*bitsp = DEFAULT_BITS_ECDSA;
 			break;
+		case KEY_ECGOST:
+			if (name != NULL)
+				*bitsp = ssh_ecgost_name_to_bits(name);
+			if (*bitsp == 0)
+				*bitsp = DEFAULT_BITS_ECGOST;
+			break;
 		case KEY_RSA:
 			*bitsp = DEFAULT_BITS;
 			break;
@@ -225,6 +234,11 @@ type_bits_valid(int type, const char *name, u_int32_t *bitsp)
 #else
 			    "256 or 384 bits");
 #endif
+		break;
+	case KEY_ECGOST:
+		if (*bitsp != 256 && *bitsp != 512)
+			fatal("Invalid ECGOST key length: must be 256 or 512");
+		break;
 	}
 #endif
 }
@@ -275,6 +289,9 @@ ask_filename(struct passwd *pw, const char *prompt)
 		case KEY_ECDSA_SK_CERT:
 		case KEY_ECDSA_SK:
 			name = _PATH_SSH_CLIENT_ID_ECDSA_SK;
+			break;
+		case KEY_ECGOST:
+			name = _PATH_SSH_CLIENT_ID_ECGOST;
 			break;
 #endif
 		case KEY_RSA_CERT:
@@ -386,6 +403,10 @@ do_convert_to_pkcs8(struct sshkey *k)
 		if (!PEM_write_EC_PUBKEY(stdout, k->ecdsa))
 			fatal("PEM_write_EC_PUBKEY failed");
 		break;
+	case KEY_ECGOST:
+		if (!ssh_ecgost_public_to_pem(k, stdout))
+			fatal("Cannot export ECGOST public key");
+		break;
 #endif
 	default:
 		fatal("%s: unsupported key type %s", __func__, sshkey_type(k));
@@ -409,6 +430,10 @@ do_convert_to_pem(struct sshkey *k)
 	case KEY_ECDSA:
 		if (!PEM_write_EC_PUBKEY(stdout, k->ecdsa))
 			fatal("PEM_write_EC_PUBKEY failed");
+		break;
+	case KEY_ECGOST:
+		if (!ssh_ecgost_public_to_pem(k, stdout))
+			fatal("Cannot export ECGOST public key");
 		break;
 #endif
 	default:
@@ -708,6 +733,10 @@ do_convert_from_pkcs8(struct sshkey **k, int *private)
 	case EVP_PKEY_EC:
 		if ((*k = sshkey_new(KEY_UNSPEC)) == NULL)
 			fatal("sshkey_new failed");
+
+		if (ssh_ecgost_private_from_pkey(pubkey, *k))
+			break;
+
 		(*k)->type = KEY_ECDSA;
 		(*k)->ecdsa = EVP_PKEY_get1_EC_KEY(pubkey);
 		(*k)->ecdsa_nid = sshkey_ecdsa_key_to_nid((*k)->ecdsa);
@@ -781,6 +810,9 @@ do_convert_from(struct passwd *pw)
 		case KEY_ECDSA:
 			ok = PEM_write_ECPrivateKey(stdout, k->ecdsa, NULL,
 			    NULL, 0, NULL, NULL);
+			break;
+		case KEY_ECGOST:
+			ok = ssh_ecgost_private_to_pem(k, stdout);
 			break;
 #endif
 		case KEY_RSA:
@@ -1046,6 +1078,7 @@ do_gen_all_hostkeys(struct passwd *pw)
 		{ "dsa", "DSA", _PATH_HOST_DSA_KEY_FILE },
 #ifdef OPENSSL_HAS_ECC
 		{ "ecdsa", "ECDSA",_PATH_HOST_ECDSA_KEY_FILE },
+		{ "ecgost", "ECGOST", _PATH_HOST_ECGOST_KEY_FILE },
 #endif /* OPENSSL_HAS_ECC */
 #endif /* WITH_OPENSSL */
 		{ "ed25519", "ED25519",_PATH_HOST_ED25519_KEY_FILE },

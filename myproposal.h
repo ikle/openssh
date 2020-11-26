@@ -50,6 +50,8 @@
 	"ecdsa-sha2-nistp256," \
 	"ecdsa-sha2-nistp384," \
 	"ecdsa-sha2-nistp521," \
+	"ssh-gost2012-256-cpa," \
+	"ssh-gost2012-512-tc26a," \
 	"sk-ecdsa-sha2-nistp256@openssh.com," \
 	"ssh-ed25519," \
 	"sk-ssh-ed25519@openssh.com," \

@@ -649,6 +649,7 @@ list_hostkey_types(void)
 			/* FALLTHROUGH */
 		case KEY_DSA:
 		case KEY_ECDSA:
+		case KEY_ECGOST:
 		case KEY_ED25519:
 		case KEY_ECDSA_SK:
 		case KEY_ED25519_SK:
@@ -1896,6 +1897,7 @@ main(int ac, char **av)
 		case KEY_RSA:
 		case KEY_DSA:
 		case KEY_ECDSA:
+		case KEY_ECGOST:
 		case KEY_ED25519:
 		case KEY_ECDSA_SK:
 		case KEY_ED25519_SK:

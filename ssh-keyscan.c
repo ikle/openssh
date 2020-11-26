@@ -63,12 +63,13 @@ int ssh_port = SSH_DEFAULT_PORT;
 #define KT_XMSS		(1<<4)
 #define KT_ECDSA_SK	(1<<5)
 #define KT_ED25519_SK	(1<<6)
+#define KT_ECGOST	(1<<7)
 
 #define KT_MIN		KT_DSA
 #define KT_MAX		KT_ED25519_SK
 
 int get_cert = 0;
-int get_keytypes = KT_RSA|KT_ECDSA|KT_ED25519|KT_ECDSA_SK|KT_ED25519_SK;
+int get_keytypes = KT_RSA|KT_ECDSA|KT_ED25519|KT_ECDSA_SK|KT_ED25519_SK|KT_ECGOST;
 
 int hash_hosts = 0;		/* Hash hostname on output */
 
@@ -271,6 +272,15 @@ keygrab_ssh2(con *c)
 		    "sk-ssh-ed25519-cert-v01@openssh.com" :
 		    "sk-ssh-ed25519@openssh.com";
 		break;
+	case KT_ECGOST:
+		myproposal[PROPOSAL_SERVER_HOST_KEY_ALGS] =
+		    "ssh-gost2012-256-cpa,"
+		    "ssh-gost2012-256-cpb,"
+		    "ssh-gost2012-256-cpc,"
+		    "ssh-gost2012-512-tc26a,"
+		    "ssh-gost2012-512-tc26b,"
+		    "ssh-gost2001-cc,"
+		    "ssh-gost2001-cpa";
 	default:
 		fatal("unknown key type %d", c->c_keytype);
 		break;
@@ -290,6 +300,7 @@ keygrab_ssh2(con *c)
 	c->c_ssh->kex->kex[KEX_DH_GEX_SHA256] = kexgex_client;
 # ifdef OPENSSL_HAS_ECC
 	c->c_ssh->kex->kex[KEX_ECDH_SHA2] = kex_gen_client;
+	c->c_ssh->kex->kex[KEX_ECDH_GOST] = kex_gen_client;
 # endif
 #endif
 	c->c_ssh->kex->kex[KEX_C25519_SHA256] = kex_gen_client;
@@ -729,6 +740,9 @@ main(int argc, char **argv)
 					break;
 				case KEY_ECDSA:
 					get_keytypes |= KT_ECDSA;
+					break;
+				case KEY_ECGOST:
+					get_keytypes |= KT_ECGOST;
 					break;
 				case KEY_RSA:
 					get_keytypes |= KT_RSA;
