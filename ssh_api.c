@@ -119,6 +119,7 @@ ssh_init(struct ssh **sshp, int is_server, struct kex_params *kex_params)
 		ssh->kex->kex[KEX_DH_GEX_SHA256] = kexgex_server;
 # ifdef OPENSSL_HAS_ECC
 		ssh->kex->kex[KEX_ECDH_SHA2] = kex_gen_server;
+		ssh->kex->kex[KEX_ECDH_GOST] = kex_gen_server;
 # endif
 #endif /* WITH_OPENSSL */
 		ssh->kex->kex[KEX_C25519_SHA256] = kex_gen_server;
@@ -137,6 +138,7 @@ ssh_init(struct ssh **sshp, int is_server, struct kex_params *kex_params)
 		ssh->kex->kex[KEX_DH_GEX_SHA256] = kexgex_client;
 # ifdef OPENSSL_HAS_ECC
 		ssh->kex->kex[KEX_ECDH_SHA2] = kex_gen_client;
+		ssh->kex->kex[KEX_ECDH_GOST] = kex_gen_client;
 # endif
 #endif /* WITH_OPENSSL */
 		ssh->kex->kex[KEX_C25519_SHA256] = kex_gen_client;

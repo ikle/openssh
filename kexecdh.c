@@ -36,6 +36,7 @@
 
 #include <openssl/ecdh.h>
 
+#include "evp.h"
 #include "sshkey.h"
 #include "kex.h"
 #include "sshbuf.h"
@@ -55,7 +56,8 @@ kex_ecdh_keypair(struct kex *kex)
 	struct sshbuf *buf = NULL;
 	int r;
 
-	if ((client_key = EC_KEY_new_by_curve_name(kex->ec_nid)) == NULL) {
+	client_key = EC_KEY_new_by_curve_name_ex(kex->key_alg, kex->ec_nid);
+	if (client_key == NULL) {
 		r = SSH_ERR_ALLOC_FAIL;
 		goto out;
 	}
@@ -101,7 +103,8 @@ kex_ecdh_enc(struct kex *kex, const struct sshbuf *client_blob,
 	*server_blobp = NULL;
 	*shared_secretp = NULL;
 
-	if ((server_key = EC_KEY_new_by_curve_name(kex->ec_nid)) == NULL) {
+	server_key = EC_KEY_new_by_curve_name_ex(kex->key_alg, kex->ec_nid);
+	if (server_key == NULL) {
 		r = SSH_ERR_ALLOC_FAIL;
 		goto out;
 	}

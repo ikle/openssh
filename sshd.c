@@ -2486,6 +2486,7 @@ do_ssh2_kex(struct ssh *ssh)
 	kex->kex[KEX_DH_GEX_SHA256] = kexgex_server;
 # ifdef OPENSSL_HAS_ECC
 	kex->kex[KEX_ECDH_SHA2] = kex_gen_server;
+	kex->kex[KEX_ECDH_GOST] = kex_gen_server;
 # endif
 # ifdef GSSAPI
 	if (options.gss_keyex) {

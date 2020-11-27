@@ -64,6 +64,13 @@
 #define	KEX_CURVE25519_SHA256_OLD	"curve25519-sha256@libssh.org"
 #define	KEX_SNTRUP4591761X25519_SHA512	"sntrup4591761x25519-sha512@tinyssh.org"
 
+#define KEX_ECDH_GOST2001_CPA		"ecdh-gost2001-cpa"
+#define KEX_ECDH_GOST2001_CPB		"ecdh-gost2001-cpb"
+#define KEX_ECDH_GOST2012_256_CPA	"ecdh-gost2012-256-cpa"
+#define KEX_ECDH_GOST2012_256_CPB	"ecdh-gost2012-256-cpb"
+#define KEX_ECDH_GOST2012_256		"ecdh-gost2012-256"
+#define KEX_ECDH_GOST2012_512		"ecdh-gost2012-512"
+
 #define COMP_NONE	0
 /* pre-auth compression (COMP_ZLIB) is only supported in the client */
 #define COMP_ZLIB	1
@@ -100,6 +107,7 @@ enum kex_exchange {
 	KEX_DH_GEX_SHA1,
 	KEX_DH_GEX_SHA256,
 	KEX_ECDH_SHA2,
+	KEX_ECDH_GOST,
 	KEX_C25519_SHA256,
 	KEX_KEM_SNTRUP4591761X25519_SHA512,
 #ifdef GSSAPI

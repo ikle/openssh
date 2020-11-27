@@ -30,6 +30,9 @@
 	"ecdh-sha2-nistp256," \
 	"ecdh-sha2-nistp384," \
 	"ecdh-sha2-nistp521," \
+	"ecdh-gost2012-256," \
+	"ecdh-gost2012-512," \
+	"ecdh-gost2012-256-cpa," \
 	"diffie-hellman-group-exchange-sha256," \
 	"diffie-hellman-group16-sha512," \
 	"diffie-hellman-group18-sha512," \

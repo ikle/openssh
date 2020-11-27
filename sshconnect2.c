@@ -308,6 +308,7 @@ ssh_kex2(struct ssh *ssh, char *host, struct sockaddr *hostaddr, u_short port)
 	ssh->kex->kex[KEX_DH_GEX_SHA256] = kexgex_client;
 # ifdef OPENSSL_HAS_ECC
 	ssh->kex->kex[KEX_ECDH_SHA2] = kex_gen_client;
+	ssh->kex->kex[KEX_ECDH_GOST] = kex_gen_client;
 # endif
 # ifdef GSSAPI
 	if (options.gss_keyex) {

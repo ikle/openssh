@@ -112,6 +112,26 @@ static const struct kexalg kexalgs[] = {
 	{ KEX_ECDH_SHA2_NISTP521, KEX_ECDH_SHA2, 0, NID_secp521r1,
 	    SSH_DIGEST_SHA512 },
 # endif /* OPENSSL_HAS_NISTP521 */
+#ifdef NID_id_GostR3410_2001_CryptoPro_XchA_ParamSet
+	{ KEX_ECDH_GOST2001_CPA, KEX_ECDH_GOST, NID_id_GostR3410_2001,
+	    NID_id_GostR3410_2001_CryptoPro_XchA_ParamSet, SSH_DIGEST_GOSTHASH },
+	{ KEX_ECDH_GOST2001_CPB, KEX_ECDH_GOST, NID_id_GostR3410_2001,
+	    NID_id_GostR3410_2001_CryptoPro_XchB_ParamSet, SSH_DIGEST_GOSTHASH },
+#ifdef NID_id_GostR3410_2012_256
+	{ KEX_ECDH_GOST2012_256_CPA, KEX_ECDH_GOST, NID_id_GostR3410_2012_256,
+	    NID_id_GostR3410_2001_CryptoPro_XchA_ParamSet, SSH_DIGEST_STRIBOG_256 },
+	{ KEX_ECDH_GOST2012_256_CPB, KEX_ECDH_GOST, NID_id_GostR3410_2012_256,
+	    NID_id_GostR3410_2001_CryptoPro_XchB_ParamSet, SSH_DIGEST_STRIBOG_256 },
+#endif /* GOST R 34.10-2012 256-bit */
+#endif /* GOST R 34.10 CryptoPro Exchange Paramset */
+#ifdef NID_id_tc26_agreement_gost_3410_2012_256
+	{ KEX_ECDH_GOST2012_256, KEX_ECDH_GOST, NID_id_GostR3410_2012_256,
+	    NID_id_tc26_agreement_gost_3410_2012_256, SSH_DIGEST_STRIBOG_256 },
+#endif /* GOST R 34.10-2012 256-bit TC26 Paramset */
+#ifdef NID_id_tc26_agreement_gost_3410_2012_512
+	{ KEX_ECDH_GOST2012_512, KEX_ECDH_GOST, NID_id_GostR3410_2012_512,
+	    NID_id_tc26_agreement_gost_3410_2012_512, SSH_DIGEST_STRIBOG_512 },
+#endif /* GOST R 34.10-2012 512-bit TC26 Paramset */
 #endif /* OPENSSL_HAS_ECC */
 #endif /* WITH_OPENSSL */
 #if defined(HAVE_EVP_SHA256) || !defined(WITH_OPENSSL)
