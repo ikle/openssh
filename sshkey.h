@@ -152,6 +152,8 @@ struct sshkey {
 	size_t	shielded_len;
 	u_char	*shield_prekey;
 	size_t	shield_prekey_len;
+	/* Generic fields */
+	const void *info;	/* key-specific constant info */
 };
 
 #define	ED25519_SK_SZ	crypto_sign_ed25519_SECRETKEYBYTES
