@@ -161,6 +161,7 @@ struct kex {
 	sig_atomic_t done;
 	u_int	flags;
 	int	hash_alg;
+	int	key_alg;
 	int	ec_nid;
 #ifdef GSSAPI
 	int	gss_deleg_creds;
