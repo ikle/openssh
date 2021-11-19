@@ -234,7 +234,7 @@ ssh_ecgost_generate_private_key(unsigned bits, struct sshkey *res)
 {
 	const struct ecgost_info *info;
 	EVP_PKEY_CTX *c;
-	EVP_PKEY *pkey;
+	EVP_PKEY *pkey = NULL;
 	EC_KEY *key;
 
 	if (!ssh_ecgost_is_empty(res))
