@@ -1,0 +1,6 @@
+opt/numa/bin/ssh usr/bin/numa-ssh
+opt/numa/bin/scp usr/bin/numa-scp
+opt/numa/bin/ssh opt/numa/bin/slogin
+opt/numa/share/man/man1/ssh.1 opt/numa/share/man/man1/slogin.1
+# enable systemd user unit for graphical sessions that use systemd
+usr/lib/systemd/user/numa-ssh-agent.service usr/lib/systemd/user/graphical-session-pre.target.wants/numa-ssh-agent.service

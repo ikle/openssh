@@ -1,0 +1,540 @@
+From 09382c11f913f4b38fc856b5182b553b5c66b114 Mon Sep 17 00:00:00 2001
+From: "Alexei A. Smekalkine" <ikle@ikle.ru>
+Date: Thu, 26 Nov 2020 15:20:16 +0300
+Subject: [PATCH 7/8] Add support for GOST EC keys
+
+---
+ myproposal.h  |  2 ++
+ pathnames.h   |  2 ++
+ readconf.c    |  1 +
+ servconf.c    |  2 ++
+ ssh-add.c     |  1 +
+ ssh-keygen.c  | 33 +++++++++++++++++++++++++
+ ssh-keyscan.c | 16 ++++++++++++-
+ ssh.c         |  4 +++-
+ sshd.c        |  2 ++
+ sshkey.c      | 77 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-
+ sshkey.h      |  1 +
+ 11 files changed, 138 insertions(+), 3 deletions(-)
+
+diff --git a/myproposal.h b/myproposal.h
+index d22b584..430d652 100644
+--- a/myproposal.h
++++ b/myproposal.h
+@@ -50,6 +50,8 @@
+ 	"ecdsa-sha2-nistp256," \
+ 	"ecdsa-sha2-nistp384," \
+ 	"ecdsa-sha2-nistp521," \
++	"ssh-gost2012-256-cpa," \
++	"ssh-gost2012-512-tc26a," \
+ 	"sk-ecdsa-sha2-nistp256@openssh.com," \
+ 	"ssh-ed25519," \
+ 	"sk-ssh-ed25519@openssh.com," \
+diff --git a/pathnames.h b/pathnames.h
+index f7ca5a7..6d72afa 100644
+--- a/pathnames.h
++++ b/pathnames.h
+@@ -38,6 +38,7 @@
+ #define _PATH_HOST_CONFIG_FILE		SSHDIR "/ssh_config"
+ #define _PATH_HOST_DSA_KEY_FILE		SSHDIR "/ssh_host_dsa_key"
+ #define _PATH_HOST_ECDSA_KEY_FILE	SSHDIR "/ssh_host_ecdsa_key"
++#define _PATH_HOST_ECGOST_KEY_FILE	SSHDIR "/ssh_host_ecgost_key"
+ #define _PATH_HOST_ED25519_KEY_FILE	SSHDIR "/ssh_host_ed25519_key"
+ #define _PATH_HOST_XMSS_KEY_FILE	SSHDIR "/ssh_host_xmss_key"
+ #define _PATH_HOST_RSA_KEY_FILE		SSHDIR "/ssh_host_rsa_key"
+@@ -74,6 +75,7 @@
+  */
+ #define _PATH_SSH_CLIENT_ID_DSA		_PATH_SSH_USER_DIR "/id_dsa"
+ #define _PATH_SSH_CLIENT_ID_ECDSA	_PATH_SSH_USER_DIR "/id_ecdsa"
++#define _PATH_SSH_CLIENT_ID_ECGOST	_PATH_SSH_USER_DIR "/id_ecgost"
+ #define _PATH_SSH_CLIENT_ID_RSA		_PATH_SSH_USER_DIR "/id_rsa"
+ #define _PATH_SSH_CLIENT_ID_ED25519	_PATH_SSH_USER_DIR "/id_ed25519"
+ #define _PATH_SSH_CLIENT_ID_XMSS	_PATH_SSH_USER_DIR "/id_xmss"
+diff --git a/readconf.c b/readconf.c
+index c60df56..baf856f 100644
+--- a/readconf.c
++++ b/readconf.c
+@@ -2231,6 +2231,7 @@ fill_default_options(Options * options)
+ 		add_identity_file(options, "~/", _PATH_SSH_CLIENT_ID_ECDSA, 0);
+ 		add_identity_file(options, "~/",
+ 		    _PATH_SSH_CLIENT_ID_ECDSA_SK, 0);
++		add_identity_file(options, "~/", _PATH_SSH_CLIENT_ID_ECGOST, 0);
+ #endif
+ 		add_identity_file(options, "~/",
+ 		    _PATH_SSH_CLIENT_ID_ED25519, 0);
+diff --git a/servconf.c b/servconf.c
+index 98afcfc..4c8c8f0 100644
+--- a/servconf.c
++++ b/servconf.c
+@@ -314,6 +314,8 @@ fill_default_server_options(ServerOptions *options)
+ #ifdef OPENSSL_HAS_ECC
+ 		servconf_add_hostkey("[default]", 0, options,
+ 		    _PATH_HOST_ECDSA_KEY_FILE, 0);
++		servconf_add_hostkey("[default]", 0, options,
++		    _PATH_HOST_ECGOST_KEY_FILE, 0);
+ #endif
+ 		servconf_add_hostkey("[default]", 0, options,
+ 		    _PATH_HOST_ED25519_KEY_FILE, 0);
+diff --git a/ssh-add.c b/ssh-add.c
+index 936dc21..0453379 100644
+--- a/ssh-add.c
++++ b/ssh-add.c
+@@ -80,6 +80,7 @@ static char *default_files[] = {
+ #ifdef OPENSSL_HAS_ECC
+ 	_PATH_SSH_CLIENT_ID_ECDSA,
+ 	_PATH_SSH_CLIENT_ID_ECDSA_SK,
++	_PATH_SSH_CLIENT_ID_ECGOST,
+ #endif
+ #endif /* WITH_OPENSSL */
+ 	_PATH_SSH_CLIENT_ID_ED25519,
+diff --git a/ssh-keygen.c b/ssh-keygen.c
+index a12b79a..f72ee70 100644
+--- a/ssh-keygen.c
++++ b/ssh-keygen.c
+@@ -22,6 +22,8 @@
+ #include <openssl/evp.h>
+ #include <openssl/pem.h>
+ #include "openbsd-compat/openssl-compat.h"
++
++#include "ssh-ecgost.h"
+ #endif
+ 
+ #ifdef HAVE_STDINT_H
+@@ -86,6 +88,7 @@
+ #define DEFAULT_BITS		3072
+ #define DEFAULT_BITS_DSA	1024
+ #define DEFAULT_BITS_ECDSA	256
++#define DEFAULT_BITS_ECGOST	256
+ 
+ static int quiet = 0;
+ 
+@@ -197,6 +200,12 @@ type_bits_valid(int type, const char *name, u_int32_t *bitsp)
+ 			if (*bitsp == 0)
+ 				*bitsp = DEFAULT_BITS_ECDSA;
+ 			break;
++		case KEY_ECGOST:
++			if (name != NULL)
++				*bitsp = ssh_ecgost_name_to_bits(name);
++			if (*bitsp == 0)
++				*bitsp = DEFAULT_BITS_ECGOST;
++			break;
+ 		case KEY_RSA:
+ 			*bitsp = DEFAULT_BITS;
+ 			break;
+@@ -225,6 +234,11 @@ type_bits_valid(int type, const char *name, u_int32_t *bitsp)
+ #else
+ 			    "256 or 384 bits");
+ #endif
++		break;
++	case KEY_ECGOST:
++		if (*bitsp != 256 && *bitsp != 512)
++			fatal("Invalid ECGOST key length: must be 256 or 512");
++		break;
+ 	}
+ #endif
+ }
+@@ -276,6 +290,9 @@ ask_filename(struct passwd *pw, const char *prompt)
+ 		case KEY_ECDSA_SK:
+ 			name = _PATH_SSH_CLIENT_ID_ECDSA_SK;
+ 			break;
++		case KEY_ECGOST:
++			name = _PATH_SSH_CLIENT_ID_ECGOST;
++			break;
+ #endif
+ 		case KEY_RSA_CERT:
+ 		case KEY_RSA:
+@@ -386,6 +403,10 @@ do_convert_to_pkcs8(struct sshkey *k)
+ 		if (!PEM_write_EC_PUBKEY(stdout, k->ecdsa))
+ 			fatal("PEM_write_EC_PUBKEY failed");
+ 		break;
++	case KEY_ECGOST:
++		if (!ssh_ecgost_public_to_pem(k, stdout))
++			fatal("Cannot export ECGOST public key");
++		break;
+ #endif
+ 	default:
+ 		fatal("%s: unsupported key type %s", __func__, sshkey_type(k));
+@@ -410,6 +431,10 @@ do_convert_to_pem(struct sshkey *k)
+ 		if (!PEM_write_EC_PUBKEY(stdout, k->ecdsa))
+ 			fatal("PEM_write_EC_PUBKEY failed");
+ 		break;
++	case KEY_ECGOST:
++		if (!ssh_ecgost_public_to_pem(k, stdout))
++			fatal("Cannot export ECGOST public key");
++		break;
+ #endif
+ 	default:
+ 		fatal("%s: unsupported key type %s", __func__, sshkey_type(k));
+@@ -708,6 +733,10 @@ do_convert_from_pkcs8(struct sshkey **k, int *private)
+ 	case EVP_PKEY_EC:
+ 		if ((*k = sshkey_new(KEY_UNSPEC)) == NULL)
+ 			fatal("sshkey_new failed");
++
++		if (ssh_ecgost_private_from_pkey(pubkey, *k))
++			break;
++
+ 		(*k)->type = KEY_ECDSA;
+ 		(*k)->ecdsa = EVP_PKEY_get1_EC_KEY(pubkey);
+ 		(*k)->ecdsa_nid = sshkey_ecdsa_key_to_nid((*k)->ecdsa);
+@@ -782,6 +811,9 @@ do_convert_from(struct passwd *pw)
+ 			ok = PEM_write_ECPrivateKey(stdout, k->ecdsa, NULL,
+ 			    NULL, 0, NULL, NULL);
+ 			break;
++		case KEY_ECGOST:
++			ok = ssh_ecgost_private_to_pem(k, stdout);
++			break;
+ #endif
+ 		case KEY_RSA:
+ 			ok = PEM_write_RSAPrivateKey(stdout, k->rsa, NULL,
+@@ -1046,6 +1078,7 @@ do_gen_all_hostkeys(struct passwd *pw)
+ 		{ "dsa", "DSA", _PATH_HOST_DSA_KEY_FILE },
+ #ifdef OPENSSL_HAS_ECC
+ 		{ "ecdsa", "ECDSA",_PATH_HOST_ECDSA_KEY_FILE },
++		{ "ecgost", "ECGOST", _PATH_HOST_ECGOST_KEY_FILE },
+ #endif /* OPENSSL_HAS_ECC */
+ #endif /* WITH_OPENSSL */
+ 		{ "ed25519", "ED25519",_PATH_HOST_ED25519_KEY_FILE },
+diff --git a/ssh-keyscan.c b/ssh-keyscan.c
+index ca19042..f281189 100644
+--- a/ssh-keyscan.c
++++ b/ssh-keyscan.c
+@@ -63,12 +63,13 @@ int ssh_port = SSH_DEFAULT_PORT;
+ #define KT_XMSS		(1<<4)
+ #define KT_ECDSA_SK	(1<<5)
+ #define KT_ED25519_SK	(1<<6)
++#define KT_ECGOST	(1<<7)
+ 
+ #define KT_MIN		KT_DSA
+ #define KT_MAX		KT_ED25519_SK
+ 
+ int get_cert = 0;
+-int get_keytypes = KT_RSA|KT_ECDSA|KT_ED25519|KT_ECDSA_SK|KT_ED25519_SK;
++int get_keytypes = KT_RSA|KT_ECDSA|KT_ED25519|KT_ECDSA_SK|KT_ED25519_SK|KT_ECGOST;
+ 
+ int hash_hosts = 0;		/* Hash hostname on output */
+ 
+@@ -271,6 +272,15 @@ keygrab_ssh2(con *c)
+ 		    "sk-ssh-ed25519-cert-v01@openssh.com" :
+ 		    "sk-ssh-ed25519@openssh.com";
+ 		break;
++	case KT_ECGOST:
++		myproposal[PROPOSAL_SERVER_HOST_KEY_ALGS] =
++		    "ssh-gost2012-256-cpa,"
++		    "ssh-gost2012-256-cpb,"
++		    "ssh-gost2012-256-cpc,"
++		    "ssh-gost2012-512-tc26a,"
++		    "ssh-gost2012-512-tc26b,"
++		    "ssh-gost2001-cc,"
++		    "ssh-gost2001-cpa";
+ 	default:
+ 		fatal("unknown key type %d", c->c_keytype);
+ 		break;
+@@ -290,6 +300,7 @@ keygrab_ssh2(con *c)
+ 	c->c_ssh->kex->kex[KEX_DH_GEX_SHA256] = kexgex_client;
+ # ifdef OPENSSL_HAS_ECC
+ 	c->c_ssh->kex->kex[KEX_ECDH_SHA2] = kex_gen_client;
++	c->c_ssh->kex->kex[KEX_ECDH_GOST] = kex_gen_client;
+ # endif
+ #endif
+ 	c->c_ssh->kex->kex[KEX_C25519_SHA256] = kex_gen_client;
+@@ -730,6 +741,9 @@ main(int argc, char **argv)
+ 				case KEY_ECDSA:
+ 					get_keytypes |= KT_ECDSA;
+ 					break;
++				case KEY_ECGOST:
++					get_keytypes |= KT_ECGOST;
++					break;
+ 				case KEY_RSA:
+ 					get_keytypes |= KT_RSA;
+ 					break;
+diff --git a/ssh.c b/ssh.c
+index aa15b8a..4e7ae01 100644
+--- a/ssh.c
++++ b/ssh.c
+@@ -1565,7 +1565,7 @@ main(int ac, char **av)
+ 	sensitive_data.nkeys = 0;
+ 	sensitive_data.keys = NULL;
+ 	if (options.hostbased_authentication) {
+-		sensitive_data.nkeys = 10;
++		sensitive_data.nkeys = 12;
+ 		sensitive_data.keys = xcalloc(sensitive_data.nkeys,
+ 		    sizeof(struct sshkey));
+ 
+@@ -1593,6 +1593,8 @@ main(int ac, char **av)
+ 			L_PUBKEY(_PATH_HOST_DSA_KEY_FILE, 7);
+ 			L_CERT(_PATH_HOST_XMSS_KEY_FILE, 8);
+ 			L_PUBKEY(_PATH_HOST_XMSS_KEY_FILE, 9);
++			L_CERT(_PATH_HOST_ECGOST_KEY_FILE, 10);
++			L_PUBKEY(_PATH_HOST_ECGOST_KEY_FILE, 11);
+ 		}
+ 	}
+ 
+diff --git a/sshd.c b/sshd.c
+index fb9b7b7..80073f9 100644
+--- a/sshd.c
++++ b/sshd.c
+@@ -649,6 +649,7 @@ list_hostkey_types(void)
+ 			/* FALLTHROUGH */
+ 		case KEY_DSA:
+ 		case KEY_ECDSA:
++		case KEY_ECGOST:
+ 		case KEY_ED25519:
+ 		case KEY_ECDSA_SK:
+ 		case KEY_ED25519_SK:
+@@ -1896,6 +1897,7 @@ main(int ac, char **av)
+ 		case KEY_RSA:
+ 		case KEY_DSA:
+ 		case KEY_ECDSA:
++		case KEY_ECGOST:
+ 		case KEY_ED25519:
+ 		case KEY_ECDSA_SK:
+ 		case KEY_ED25519_SK:
+diff --git a/sshkey.c b/sshkey.c
+index b88282e..95fbea3 100644
+--- a/sshkey.c
++++ b/sshkey.c
+@@ -34,6 +34,8 @@
+ #include <openssl/evp.h>
+ #include <openssl/err.h>
+ #include <openssl/pem.h>
++
++#include "ssh-ecgost.h"
+ #endif
+ 
+ #include "crypto_api.h"
+@@ -134,6 +136,17 @@ static const struct keytype keytypes[] = {
+ 	    KEY_ECDSA_SK, NID_X9_62_prime256v1, 0, 0 },
+ 	{ "webauthn-sk-ecdsa-sha2-nistp256@openssh.com", "ECDSA-SK", NULL,
+ 	    KEY_ECDSA_SK, NID_X9_62_prime256v1, 0, 1 },
++
++	{ "ssh-gost2012-256-cpa", "GOST2012-256", NULL, KEY_ECGOST, 0, 0, 0 },
++	{ "ssh-gost2012-256-cpb", "GOST2012-256", NULL, KEY_ECGOST, 0, 0, 0 },
++	{ "ssh-gost2012-256-cpc", "GOST2012-256", NULL, KEY_ECGOST, 0, 0, 0 },
++
++	{ "ssh-gost2012-512-tc26a", "GOST2012-512", NULL, KEY_ECGOST, 0, 0, 0 },
++	{ "ssh-gost2012-512-tc26b", "GOST2012-512", NULL, KEY_ECGOST, 0, 0, 0 },
++
++	{ "ssh-gost2001-cpa", "GOST2001", NULL, KEY_ECGOST, 0, 0, 0 },
++	{ "ssh-gost2001-cc",  "GOST2001", NULL, KEY_ECGOST, 0, 0, 0 },
++
+ # endif /* OPENSSL_HAS_ECC */
+ 	{ "ssh-rsa-cert-v01@openssh.com", "RSA-CERT", NULL,
+ 	    KEY_RSA_CERT, 0, 1, 0 },
+@@ -349,6 +362,8 @@ sshkey_size(const struct sshkey *k)
+ 	case KEY_XMSS:
+ 	case KEY_XMSS_CERT:
+ 		return 256;	/* XXX */
++	case KEY_ECGOST:
++		return ssh_ecgost_key_size(k);
+ 	}
+ 	return 0;
+ }
+@@ -363,6 +378,7 @@ sshkey_type_is_valid_ca(int type)
+ 	case KEY_ECDSA_SK:
+ 	case KEY_ED25519:
+ 	case KEY_ED25519_SK:
++	case KEY_ECGOST:
+ 	case KEY_XMSS:
+ 		return 1;
+ 	default:
+@@ -584,6 +600,7 @@ sshkey_new(int type)
+ 	case KEY_ECDSA_CERT:
+ 	case KEY_ECDSA_SK:
+ 	case KEY_ECDSA_SK_CERT:
++	case KEY_ECGOST:
+ 		/* Cannot do anything until we know the group */
+ 		break;
+ #endif /* WITH_OPENSSL */
+@@ -638,8 +655,10 @@ sshkey_free(struct sshkey *k)
+ 		/* FALLTHROUGH */
+ 	case KEY_ECDSA:
+ 	case KEY_ECDSA_CERT:
++	case KEY_ECGOST:
+ 		EC_KEY_free(k->ecdsa);
+ 		k->ecdsa = NULL;
++		k->info  = NULL;
+ 		break;
+ # endif /* OPENSSL_HAS_ECC */
+ #endif /* WITH_OPENSSL */
+@@ -758,6 +777,8 @@ sshkey_equal_public(const struct sshkey *a, const struct sshkey *b)
+ 		    EC_KEY_get0_public_key(b->ecdsa), NULL) != 0)
+ 			return 0;
+ 		return 1;
++	case KEY_ECGOST:
++		return ssh_ecgost_equal_public(a, b);
+ # endif /* OPENSSL_HAS_ECC */
+ #endif /* WITH_OPENSSL */
+ 	case KEY_ED25519_SK:
+@@ -864,6 +885,8 @@ to_blob_buf(const struct sshkey *key, struct sshbuf *b, int force_plain,
+ 				return ret;
+ 		}
+ 		break;
++	case KEY_ECGOST:
++		return sshbuf_put_ecgost(b, key, 1, 0);
+ # endif
+ 	case KEY_RSA:
+ 		if (key->rsa == NULL)
+@@ -1324,6 +1347,7 @@ sshkey_read(struct sshkey *ret, char **cpp)
+ 	case KEY_RSA:
+ 	case KEY_DSA:
+ 	case KEY_ECDSA:
++	case KEY_ECGOST:
+ 	case KEY_ECDSA_SK:
+ 	case KEY_ED25519:
+ 	case KEY_ED25519_SK:
+@@ -1446,6 +1470,16 @@ sshkey_read(struct sshkey *ret, char **cpp)
+ 		fprintf(stderr, "App: %s\n", ret->sk_application);
+ #endif
+ 		break;
++	case KEY_ECGOST:
++		EC_KEY_free(ret->ecdsa);
++		ret->ecdsa = k->ecdsa;
++		ret->info  = k->info;
++		k->ecdsa = NULL;
++		k->info  = NULL;
++#ifdef DEBUG_PK
++		sshkey_dump_ec_key(ret->ecdsa);
++#endif
++		break;
+ # endif /* OPENSSL_HAS_ECC */
+ #endif /* WITH_OPENSSL */
+ 	case KEY_ED25519:
+@@ -1746,6 +1780,9 @@ sshkey_generate(int type, u_int bits, struct sshkey **keyp)
+ 		ret = ecdsa_generate_private_key(bits, &k->ecdsa_nid,
+ 		    &k->ecdsa);
+ 		break;
++	case KEY_ECGOST:
++		ret = ssh_ecgost_generate_private_key(bits, k);
++		break;
+ # endif /* OPENSSL_HAS_ECC */
+ 	case KEY_RSA:
+ 		ret = rsa_generate_private_key(bits, &k->rsa);
+@@ -1897,6 +1934,10 @@ sshkey_from_private(const struct sshkey *k, struct sshkey **pkp)
+ 		if ((n->sk_application = strdup(k->sk_application)) == NULL)
+ 			goto out;
+ 		break;
++	case KEY_ECGOST:
++		if ((r = ssh_ecgost_get_public_key(k, n)) != 0)
++			goto out;
++		break;
+ # endif /* OPENSSL_HAS_ECC */
+ 	case KEY_RSA:
+ 	case KEY_RSA_CERT:
+@@ -2496,6 +2537,15 @@ sshkey_from_blob_internal(struct sshbuf *b, struct sshkey **keyp,
+ #endif
+ 		}
+ 		break;
++	case KEY_ECGOST:
++		if ((key = sshkey_new(type)) == NULL) {
++			ret = SSH_ERR_ALLOC_FAIL;
++			goto out;
++		}
++
++		if ((ret = sshbuf_get_ecgost(b, ktype, 0, key)) != 0)
++			goto out;
++		break;
+ # endif /* OPENSSL_HAS_ECC */
+ #endif /* WITH_OPENSSL */
+ 	case KEY_ED25519_CERT:
+@@ -2752,6 +2802,9 @@ sshkey_sign(struct sshkey *key,
+ 	case KEY_ECDSA:
+ 		r = ssh_ecdsa_sign(key, sigp, lenp, data, datalen, compat);
+ 		break;
++	case KEY_ECGOST:
++		r = ssh_ecgost_sign(key, sigp, lenp, data, datalen, compat);
++		break;
+ # endif /* OPENSSL_HAS_ECC */
+ 	case KEY_RSA_CERT:
+ 	case KEY_RSA:
+@@ -2807,6 +2860,8 @@ sshkey_verify(const struct sshkey *key,
+ 	case KEY_ECDSA_CERT:
+ 	case KEY_ECDSA:
+ 		return ssh_ecdsa_verify(key, sig, siglen, data, dlen, compat);
++	case KEY_ECGOST:
++		return ssh_ecgost_verify(key, sig, siglen, data, dlen, compat);
+ 	case KEY_ECDSA_SK_CERT:
+ 	case KEY_ECDSA_SK:
+ 		return ssh_ecdsa_sk_verify(key, sig, siglen, data, dlen,
+@@ -3277,6 +3332,10 @@ sshkey_private_serialize_opt(struct sshkey *key, struct sshbuf *buf,
+ 		    (r = sshbuf_put_stringb(b, key->sk_reserved)) != 0)
+ 			goto out;
+ 		break;
++	case KEY_ECGOST:
++		if ((r = sshbuf_put_ecgost(b, key, 0, 1)) != 0)
++			goto out;
++		break;
+ # endif /* OPENSSL_HAS_ECC */
+ #endif /* WITH_OPENSSL */
+ 	case KEY_ED25519:
+@@ -3531,6 +3590,10 @@ sshkey_private_deserialize(struct sshbuf *buf, struct sshkey **kp)
+ 		    EC_KEY_get0_public_key(k->ecdsa))) != 0)
+ 			goto out;
+ 		break;
++	case KEY_ECGOST:
++		if ((r = sshbuf_get_ecgost(buf, tname, 1, k)) != 0)
++			goto out;
++		break;
+ # endif /* OPENSSL_HAS_ECC */
+ 	case KEY_RSA:
+ 		if ((r = sshbuf_get_bignum2(buf, &rsa_n)) != 0 ||
+@@ -4365,6 +4428,12 @@ sshkey_private_to_blob_pem_pkcs8(struct sshkey *key, struct sshbuf *buf,
+ 			success = EVP_PKEY_set1_EC_KEY(pkey, key->ecdsa);
+ 		}
+ 		break;
++	case KEY_ECGOST:
++		success = (format == SSHKEY_PRIVATE_PEM) ?
++			ssh_ecgost_private_to_pem_bio(key, cipher,
++						      passphrase, len, bio) :
++			ssh_ecgost_private_to_pkey(key, pkey);
++		break;
+ #endif
+ 	case KEY_RSA:
+ 		if (format == SSHKEY_PRIVATE_PEM) {
+@@ -4419,6 +4488,7 @@ sshkey_private_to_fileblob(struct sshkey *key, struct sshbuf *blob,
+ #ifdef WITH_OPENSSL
+ 	case KEY_DSA:
+ 	case KEY_ECDSA:
++	case KEY_ECGOST:
+ 	case KEY_RSA:
+ 		break; /* see below */
+ #endif /* WITH_OPENSSL */
+@@ -4591,11 +4661,15 @@ sshkey_parse_private_pem_fileblob(struct sshbuf *blob, int type,
+ #endif
+ #ifdef OPENSSL_HAS_ECC
+ 	} else if (EVP_PKEY_base_id(pk) == EVP_PKEY_EC &&
+-	    (type == KEY_UNSPEC || type == KEY_ECDSA)) {
++	    (type == KEY_UNSPEC || type == KEY_ECDSA || type == KEY_ECGOST)) {
+ 		if ((prv = sshkey_new(KEY_UNSPEC)) == NULL) {
+ 			r = SSH_ERR_ALLOC_FAIL;
+ 			goto out;
+ 		}
++
++		if (ssh_ecgost_private_from_pkey(pk, prv))
++			goto ok;
++
+ 		prv->ecdsa = EVP_PKEY_get1_EC_KEY(pk);
+ 		prv->type = KEY_ECDSA;
+ 		prv->ecdsa_nid = sshkey_ecdsa_key_to_nid(prv->ecdsa);
+@@ -4616,6 +4690,7 @@ sshkey_parse_private_pem_fileblob(struct sshbuf *blob, int type,
+ 		r = SSH_ERR_INVALID_FORMAT;
+ 		goto out;
+ 	}
++ ok:
+ 	r = 0;
+ 	if (keyp != NULL) {
+ 		*keyp = prv;
+diff --git a/sshkey.h b/sshkey.h
+index 6cd4626..c196bcb 100644
+--- a/sshkey.h
++++ b/sshkey.h
+@@ -59,6 +59,7 @@ enum sshkey_types {
+ 	KEY_DSA,
+ 	KEY_ECDSA,
+ 	KEY_ED25519,
++	KEY_ECGOST,
+ 	KEY_RSA_CERT,
+ 	KEY_DSA_CERT,
+ 	KEY_ECDSA_CERT,
+-- 
+2.11.0
+

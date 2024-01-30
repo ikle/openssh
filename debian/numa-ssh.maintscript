@@ -1,0 +1,1 @@
+symlink_to_dir /opt/numa/share/doc/ssh /opt/numa/share/doc/numa-openssh-client 1:6.6p1-8~

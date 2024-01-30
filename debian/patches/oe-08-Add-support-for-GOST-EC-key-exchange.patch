@@ -1,0 +1,207 @@
+From 3bf8086da3451fd02aafdba04287fd4a7e29c00a Mon Sep 17 00:00:00 2001
+From: "Alexei A. Smekalkine" <ikle@ikle.ru>
+Date: Fri, 27 Nov 2020 18:58:42 +0300
+Subject: [PATCH 8/8] Add support for GOST EC key exchange
+
+---
+ kex.c         | 20 ++++++++++++++++++++
+ kex.h         |  8 ++++++++
+ kexecdh.c     |  7 +++++--
+ kexgen.c      |  3 +++
+ monitor.c     |  1 +
+ myproposal.h  |  3 +++
+ ssh_api.c     |  2 ++
+ sshconnect2.c |  1 +
+ sshd.c        |  1 +
+ 9 files changed, 44 insertions(+), 2 deletions(-)
+
+diff --git a/kex.c b/kex.c
+index 0c408ee..0dec8b0 100644
+--- a/kex.c
++++ b/kex.c
+@@ -112,6 +112,26 @@ static const struct kexalg kexalgs[] = {
+ 	{ KEX_ECDH_SHA2_NISTP521, KEX_ECDH_SHA2, 0, NID_secp521r1,
+ 	    SSH_DIGEST_SHA512 },
+ # endif /* OPENSSL_HAS_NISTP521 */
++#ifdef NID_id_GostR3410_2001_CryptoPro_XchA_ParamSet
++	{ KEX_ECDH_GOST2001_CPA, KEX_ECDH_GOST, NID_id_GostR3410_2001,
++	    NID_id_GostR3410_2001_CryptoPro_XchA_ParamSet, SSH_DIGEST_GOSTHASH },
++	{ KEX_ECDH_GOST2001_CPB, KEX_ECDH_GOST, NID_id_GostR3410_2001,
++	    NID_id_GostR3410_2001_CryptoPro_XchB_ParamSet, SSH_DIGEST_GOSTHASH },
++#ifdef NID_id_GostR3410_2012_256
++	{ KEX_ECDH_GOST2012_256_CPA, KEX_ECDH_GOST, NID_id_GostR3410_2012_256,
++	    NID_id_GostR3410_2001_CryptoPro_XchA_ParamSet, SSH_DIGEST_STRIBOG_256 },
++	{ KEX_ECDH_GOST2012_256_CPB, KEX_ECDH_GOST, NID_id_GostR3410_2012_256,
++	    NID_id_GostR3410_2001_CryptoPro_XchB_ParamSet, SSH_DIGEST_STRIBOG_256 },
++#endif /* GOST R 34.10-2012 256-bit */
++#endif /* GOST R 34.10 CryptoPro Exchange Paramset */
++#ifdef NID_id_tc26_agreement_gost_3410_2012_256
++	{ KEX_ECDH_GOST2012_256, KEX_ECDH_GOST, NID_id_GostR3410_2012_256,
++	    NID_id_tc26_agreement_gost_3410_2012_256, SSH_DIGEST_STRIBOG_256 },
++#endif /* GOST R 34.10-2012 256-bit TC26 Paramset */
++#ifdef NID_id_tc26_agreement_gost_3410_2012_512
++	{ KEX_ECDH_GOST2012_512, KEX_ECDH_GOST, NID_id_GostR3410_2012_512,
++	    NID_id_tc26_agreement_gost_3410_2012_512, SSH_DIGEST_STRIBOG_512 },
++#endif /* GOST R 34.10-2012 512-bit TC26 Paramset */
+ #endif /* OPENSSL_HAS_ECC */
+ #endif /* WITH_OPENSSL */
+ #if defined(HAVE_EVP_SHA256) || !defined(WITH_OPENSSL)
+diff --git a/kex.h b/kex.h
+index 9838207..f4b213b 100644
+--- a/kex.h
++++ b/kex.h
+@@ -64,6 +64,13 @@
+ #define	KEX_CURVE25519_SHA256_OLD	"curve25519-sha256@libssh.org"
+ #define	KEX_SNTRUP4591761X25519_SHA512	"sntrup4591761x25519-sha512@tinyssh.org"
+ 
++#define KEX_ECDH_GOST2001_CPA		"ecdh-gost2001-cpa"
++#define KEX_ECDH_GOST2001_CPB		"ecdh-gost2001-cpb"
++#define KEX_ECDH_GOST2012_256_CPA	"ecdh-gost2012-256-cpa"
++#define KEX_ECDH_GOST2012_256_CPB	"ecdh-gost2012-256-cpb"
++#define KEX_ECDH_GOST2012_256		"ecdh-gost2012-256"
++#define KEX_ECDH_GOST2012_512		"ecdh-gost2012-512"
++
+ #define COMP_NONE	0
+ /* pre-auth compression (COMP_ZLIB) is only supported in the client */
+ #define COMP_ZLIB	1
+@@ -100,6 +107,7 @@ enum kex_exchange {
+ 	KEX_DH_GEX_SHA1,
+ 	KEX_DH_GEX_SHA256,
+ 	KEX_ECDH_SHA2,
++	KEX_ECDH_GOST,
+ 	KEX_C25519_SHA256,
+ 	KEX_KEM_SNTRUP4591761X25519_SHA512,
+ #ifdef GSSAPI
+diff --git a/kexecdh.c b/kexecdh.c
+index efb2e55..804968f 100644
+--- a/kexecdh.c
++++ b/kexecdh.c
+@@ -36,6 +36,7 @@
+ 
+ #include <openssl/ecdh.h>
+ 
++#include "evp.h"
+ #include "sshkey.h"
+ #include "kex.h"
+ #include "sshbuf.h"
+@@ -55,7 +56,8 @@ kex_ecdh_keypair(struct kex *kex)
+ 	struct sshbuf *buf = NULL;
+ 	int r;
+ 
+-	if ((client_key = EC_KEY_new_by_curve_name(kex->ec_nid)) == NULL) {
++	client_key = EC_KEY_new_by_curve_name_ng(kex->key_alg, kex->ec_nid);
++	if (client_key == NULL) {
+ 		r = SSH_ERR_ALLOC_FAIL;
+ 		goto out;
+ 	}
+@@ -101,7 +103,8 @@ kex_ecdh_enc(struct kex *kex, const struct sshbuf *client_blob,
+ 	*server_blobp = NULL;
+ 	*shared_secretp = NULL;
+ 
+-	if ((server_key = EC_KEY_new_by_curve_name(kex->ec_nid)) == NULL) {
++	server_key = EC_KEY_new_by_curve_name_ng(kex->key_alg, kex->ec_nid);
++	if (server_key == NULL) {
+ 		r = SSH_ERR_ALLOC_FAIL;
+ 		goto out;
+ 	}
+diff --git a/kexgen.c b/kexgen.c
+index c0e8c2f..38302af 100644
+--- a/kexgen.c
++++ b/kexgen.c
+@@ -111,6 +111,7 @@ kex_gen_client(struct ssh *ssh)
+ 		r = kex_dh_keypair(kex);
+ 		break;
+ 	case KEX_ECDH_SHA2:
++	case KEX_ECDH_GOST:
+ 		r = kex_ecdh_keypair(kex);
+ 		break;
+ #endif
+@@ -179,6 +180,7 @@ input_kex_gen_reply(int type, u_int32_t seq, struct ssh *ssh)
+ 		r = kex_dh_dec(kex, server_blob, &shared_secret);
+ 		break;
+ 	case KEX_ECDH_SHA2:
++	case KEX_ECDH_GOST:
+ 		r = kex_ecdh_dec(kex, server_blob, &shared_secret);
+ 		break;
+ #endif
+@@ -274,6 +276,7 @@ input_kex_gen_init(int type, u_int32_t seq, struct ssh *ssh)
+ 		    &shared_secret);
+ 		break;
+ 	case KEX_ECDH_SHA2:
++	case KEX_ECDH_GOST:
+ 		r = kex_ecdh_enc(kex, client_pubkey, &server_pubkey,
+ 		    &shared_secret);
+ 		break;
+diff --git a/monitor.c b/monitor.c
+index 9836294..dbde974 100644
+--- a/monitor.c
++++ b/monitor.c
+@@ -1770,6 +1770,7 @@ monitor_apply_keystate(struct ssh *ssh, struct monitor *pmonitor)
+ 		kex->kex[KEX_DH_GEX_SHA256] = kexgex_server;
+ # ifdef OPENSSL_HAS_ECC
+ 		kex->kex[KEX_ECDH_SHA2] = kex_gen_server;
++		kex->kex[KEX_ECDH_GOST] = kex_gen_server;
+ # endif
+ # ifdef GSSAPI
+ 		if (options.gss_keyex) {
+diff --git a/myproposal.h b/myproposal.h
+index 430d652..1b83fb7 100644
+--- a/myproposal.h
++++ b/myproposal.h
+@@ -30,6 +30,9 @@
+ 	"ecdh-sha2-nistp256," \
+ 	"ecdh-sha2-nistp384," \
+ 	"ecdh-sha2-nistp521," \
++	"ecdh-gost2012-256," \
++	"ecdh-gost2012-512," \
++	"ecdh-gost2012-256-cpa," \
+ 	"diffie-hellman-group-exchange-sha256," \
+ 	"diffie-hellman-group16-sha512," \
+ 	"diffie-hellman-group18-sha512," \
+diff --git a/ssh_api.c b/ssh_api.c
+index 129404b..0d54c59 100644
+--- a/ssh_api.c
++++ b/ssh_api.c
+@@ -119,6 +119,7 @@ ssh_init(struct ssh **sshp, int is_server, struct kex_params *kex_params)
+ 		ssh->kex->kex[KEX_DH_GEX_SHA256] = kexgex_server;
+ # ifdef OPENSSL_HAS_ECC
+ 		ssh->kex->kex[KEX_ECDH_SHA2] = kex_gen_server;
++		ssh->kex->kex[KEX_ECDH_GOST] = kex_gen_server;
+ # endif
+ #endif /* WITH_OPENSSL */
+ 		ssh->kex->kex[KEX_C25519_SHA256] = kex_gen_server;
+@@ -137,6 +138,7 @@ ssh_init(struct ssh **sshp, int is_server, struct kex_params *kex_params)
+ 		ssh->kex->kex[KEX_DH_GEX_SHA256] = kexgex_client;
+ # ifdef OPENSSL_HAS_ECC
+ 		ssh->kex->kex[KEX_ECDH_SHA2] = kex_gen_client;
++		ssh->kex->kex[KEX_ECDH_GOST] = kex_gen_client;
+ # endif
+ #endif /* WITH_OPENSSL */
+ 		ssh->kex->kex[KEX_C25519_SHA256] = kex_gen_client;
+diff --git a/sshconnect2.c b/sshconnect2.c
+index c47fc31..cb97279 100644
+--- a/sshconnect2.c
++++ b/sshconnect2.c
+@@ -308,6 +308,7 @@ ssh_kex2(struct ssh *ssh, char *host, struct sockaddr *hostaddr, u_short port)
+ 	ssh->kex->kex[KEX_DH_GEX_SHA256] = kexgex_client;
+ # ifdef OPENSSL_HAS_ECC
+ 	ssh->kex->kex[KEX_ECDH_SHA2] = kex_gen_client;
++	ssh->kex->kex[KEX_ECDH_GOST] = kex_gen_client;
+ # endif
+ # ifdef GSSAPI
+ 	if (options.gss_keyex) {
+diff --git a/sshd.c b/sshd.c
+index 80073f9..e9d1caf 100644
+--- a/sshd.c
++++ b/sshd.c
+@@ -2486,6 +2486,7 @@ do_ssh2_kex(struct ssh *ssh)
+ 	kex->kex[KEX_DH_GEX_SHA256] = kexgex_server;
+ # ifdef OPENSSL_HAS_ECC
+ 	kex->kex[KEX_ECDH_SHA2] = kex_gen_server;
++	kex->kex[KEX_ECDH_GOST] = kex_gen_server;
+ # endif
+ # ifdef GSSAPI
+ 	if (options.gss_keyex) {
+-- 
+2.11.0
+

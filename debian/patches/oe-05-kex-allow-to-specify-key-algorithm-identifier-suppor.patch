@@ -1,0 +1,152 @@
+From 3a2449aa19b66abc85ef7b44c31314d105347fa5 Mon Sep 17 00:00:00 2001
+From: "Alexei A. Smekalkine" <ikle@ikle.ru>
+Date: Tue, 1 Dec 2020 04:45:05 +0300
+Subject: [PATCH 5/8] kex: allow to specify key algorithm identifier, support
+ engines
+
+This change will allow the use of OpenSSL Envelope API for key exchange
+algorithms. An example is the method for creating a key context for
+elliptic curve algorithms accessible through an engine:
+
+    EVP_PKEY_CTX *c;
+    EVP_PKEY *pkey = NULL;
+
+    c = EVP_PKEY_CTX_new_id(kex->key_alg, NULL);
+    EVP_PKEY_CTX_ctrl(c, -1, -1, EVP_PKEY_CTRL_EC_PARAMGEN_CURVE_NID,
+                      kex->ec_nid, NULL);
+    EVP_PKEY_paramgen(c, &pkey);
+
+(In the example above, error checking has been omitted for brevity. If we
+replace "paramgen" with "keygen", then we get a procedure for generating
+a new private key.)
+
+Note that we cannot use function EC_KEY_new_by_curve_name() here, since
+it knows nothing about the curves defined by the external engine.
+Moreover, this change allows the use of potentially more algorithms
+available through a common EVP interface.
+---
+ kex.c | 52 +++++++++++++++++++++++++++-------------------------
+ kex.h |  1 +
+ 2 files changed, 28 insertions(+), 25 deletions(-)
+
+diff --git a/kex.c b/kex.c
+index d237bf2..0c408ee 100644
+--- a/kex.c
++++ b/kex.c
+@@ -40,7 +40,7 @@
+ #ifdef WITH_OPENSSL
+ #include <openssl/crypto.h>
+ #include <openssl/dh.h>
+-#include <openssl/ec.h>
++#include "evp.h"
+ #endif
+ 
+ #include "ssh.h"
+@@ -88,51 +88,52 @@ static const char *proposal_names[PROPOSAL_MAX] = {
+ struct kexalg {
+ 	char *name;
+ 	u_int type;
+-	int ec_nid;
++	int key_alg;	/* key algorithm numeric ID */
++	int ec_nid;	/* key parameter numeric ID */
+ 	int hash_alg;
+ };
+ static const struct kexalg kexalgs[] = {
+ #ifdef WITH_OPENSSL
+-	{ KEX_DH1, KEX_DH_GRP1_SHA1, 0, SSH_DIGEST_SHA1 },
+-	{ KEX_DH14_SHA1, KEX_DH_GRP14_SHA1, 0, SSH_DIGEST_SHA1 },
+-	{ KEX_DH14_SHA256, KEX_DH_GRP14_SHA256, 0, SSH_DIGEST_SHA256 },
+-	{ KEX_DH16_SHA512, KEX_DH_GRP16_SHA512, 0, SSH_DIGEST_SHA512 },
+-	{ KEX_DH18_SHA512, KEX_DH_GRP18_SHA512, 0, SSH_DIGEST_SHA512 },
+-	{ KEX_DHGEX_SHA1, KEX_DH_GEX_SHA1, 0, SSH_DIGEST_SHA1 },
++	{ KEX_DH1,         KEX_DH_GRP1_SHA1,    0, 0, SSH_DIGEST_SHA1 },
++	{ KEX_DH14_SHA1,   KEX_DH_GRP14_SHA1,   0, 0, SSH_DIGEST_SHA1 },
++	{ KEX_DH14_SHA256, KEX_DH_GRP14_SHA256, 0, 0, SSH_DIGEST_SHA256 },
++	{ KEX_DH16_SHA512, KEX_DH_GRP16_SHA512, 0, 0, SSH_DIGEST_SHA512 },
++	{ KEX_DH18_SHA512, KEX_DH_GRP18_SHA512, 0, 0, SSH_DIGEST_SHA512 },
++	{ KEX_DHGEX_SHA1,  KEX_DH_GEX_SHA1,     0, 0, SSH_DIGEST_SHA1 },
+ #ifdef HAVE_EVP_SHA256
+-	{ KEX_DHGEX_SHA256, KEX_DH_GEX_SHA256, 0, SSH_DIGEST_SHA256 },
++	{ KEX_DHGEX_SHA256, KEX_DH_GEX_SHA256,  0, 0, SSH_DIGEST_SHA256 },
+ #endif /* HAVE_EVP_SHA256 */
+ #ifdef OPENSSL_HAS_ECC
+-	{ KEX_ECDH_SHA2_NISTP256, KEX_ECDH_SHA2,
++	{ KEX_ECDH_SHA2_NISTP256, KEX_ECDH_SHA2, 0,
+ 	    NID_X9_62_prime256v1, SSH_DIGEST_SHA256 },
+-	{ KEX_ECDH_SHA2_NISTP384, KEX_ECDH_SHA2, NID_secp384r1,
++	{ KEX_ECDH_SHA2_NISTP384, KEX_ECDH_SHA2, 0, NID_secp384r1,
+ 	    SSH_DIGEST_SHA384 },
+ # ifdef OPENSSL_HAS_NISTP521
+-	{ KEX_ECDH_SHA2_NISTP521, KEX_ECDH_SHA2, NID_secp521r1,
++	{ KEX_ECDH_SHA2_NISTP521, KEX_ECDH_SHA2, 0, NID_secp521r1,
+ 	    SSH_DIGEST_SHA512 },
+ # endif /* OPENSSL_HAS_NISTP521 */
+ #endif /* OPENSSL_HAS_ECC */
+ #endif /* WITH_OPENSSL */
+ #if defined(HAVE_EVP_SHA256) || !defined(WITH_OPENSSL)
+-	{ KEX_CURVE25519_SHA256, KEX_C25519_SHA256, 0, SSH_DIGEST_SHA256 },
+-	{ KEX_CURVE25519_SHA256_OLD, KEX_C25519_SHA256, 0, SSH_DIGEST_SHA256 },
++	{ KEX_CURVE25519_SHA256,     KEX_C25519_SHA256, 0, 0, SSH_DIGEST_SHA256 },
++	{ KEX_CURVE25519_SHA256_OLD, KEX_C25519_SHA256, 0, 0, SSH_DIGEST_SHA256 },
+ 	{ KEX_SNTRUP4591761X25519_SHA512, KEX_KEM_SNTRUP4591761X25519_SHA512, 0,
+-	    SSH_DIGEST_SHA512 },
++	    0, SSH_DIGEST_SHA512 },
+ #endif /* HAVE_EVP_SHA256 || !WITH_OPENSSL */
+-	{ NULL, 0, -1, -1},
++	{ NULL, 0, 0, -1, -1},
+ };
+ static const struct kexalg gss_kexalgs[] = {
+ #ifdef GSSAPI
+-	{ KEX_GSS_GEX_SHA1_ID, KEX_GSS_GEX_SHA1, 0, SSH_DIGEST_SHA1 },
+-	{ KEX_GSS_GRP1_SHA1_ID, KEX_GSS_GRP1_SHA1, 0, SSH_DIGEST_SHA1 },
+-	{ KEX_GSS_GRP14_SHA1_ID, KEX_GSS_GRP14_SHA1, 0, SSH_DIGEST_SHA1 },
+-	{ KEX_GSS_GRP14_SHA256_ID, KEX_GSS_GRP14_SHA256, 0, SSH_DIGEST_SHA256 },
+-	{ KEX_GSS_GRP16_SHA512_ID, KEX_GSS_GRP16_SHA512, 0, SSH_DIGEST_SHA512 },
+-	{ KEX_GSS_NISTP256_SHA256_ID, KEX_GSS_NISTP256_SHA256,
++	{ KEX_GSS_GEX_SHA1_ID,     KEX_GSS_GEX_SHA1,     0, 0, SSH_DIGEST_SHA1 },
++	{ KEX_GSS_GRP1_SHA1_ID,    KEX_GSS_GRP1_SHA1,    0, 0, SSH_DIGEST_SHA1 },
++	{ KEX_GSS_GRP14_SHA1_ID,   KEX_GSS_GRP14_SHA1,   0, 0, SSH_DIGEST_SHA1 },
++	{ KEX_GSS_GRP14_SHA256_ID, KEX_GSS_GRP14_SHA256, 0, 0, SSH_DIGEST_SHA256 },
++	{ KEX_GSS_GRP16_SHA512_ID, KEX_GSS_GRP16_SHA512, 0, 0, SSH_DIGEST_SHA512 },
++	{ KEX_GSS_NISTP256_SHA256_ID, KEX_GSS_NISTP256_SHA256, 0,
+ 	    NID_X9_62_prime256v1, SSH_DIGEST_SHA256 },
+-	{ KEX_GSS_C25519_SHA256_ID, KEX_GSS_C25519_SHA256, 0, SSH_DIGEST_SHA256 },
++	{ KEX_GSS_C25519_SHA256_ID, KEX_GSS_C25519_SHA256, 0, 0, SSH_DIGEST_SHA256 },
+ #endif
+-	{ NULL, 0, -1, -1},
++	{ NULL, 0, 0, -1, -1},
+ };
+ 
+ /*
+@@ -146,7 +147,7 @@ kex_alg_available(const struct kexalg *k)
+ 	EC_KEY *key;
+ 
+ 	if (k->ec_nid > 0) {
+-		key = EC_KEY_new_by_curve_name(k->ec_nid);
++		key = EC_KEY_new_by_curve_name_ng(k->key_alg, k->ec_nid);
+ 		if (key == NULL)
+ 			return 0;
+ 
+@@ -915,6 +916,7 @@ choose_kex(struct kex *k, char *client, char *server)
+ 	}
+ 	k->kex_type = kexalg->type;
+ 	k->hash_alg = kexalg->hash_alg;
++	k->key_alg  = kexalg->key_alg;
+ 	k->ec_nid = kexalg->ec_nid;
+ 	return 0;
+ }
+diff --git a/kex.h b/kex.h
+index 938dca0..9838207 100644
+--- a/kex.h
++++ b/kex.h
+@@ -161,6 +161,7 @@ struct kex {
+ 	sig_atomic_t done;
+ 	u_int	flags;
+ 	int	hash_alg;
++	int	key_alg;
+ 	int	ec_nid;
+ #ifdef GSSAPI
+ 	int	gss_deleg_creds;
+-- 
+2.11.0
+

@@ -1,0 +1,21 @@
+#! /usr/bin/dh-exec
+
+etc/numa-ssh/moduli
+opt/numa/sbin/sshd
+opt/numa/share/man/man5/authorized_keys.5
+opt/numa/share/man/man5/moduli.5
+opt/numa/share/man/man5/sshd_config.5
+opt/numa/share/man/man8/sshd.8
+
+sshd_config => opt/numa/share/openssh/sshd_config
+debian/numa-openssh-server.ucf-md5sum => opt/numa/share/openssh/sshd_config.md5sum
+
+debian/numa-openssh-server.ufw.profile => etc/ufw/applications.d/numa-openssh-server
+debian/systemd/numa-ssh.socket lib/systemd/system
+debian/systemd/numa-rescue-ssh.target lib/systemd/system
+debian/systemd/numa-ssh@.service lib/systemd/system
+debian/systemd/numa-ssh-session-cleanup opt/numa/lib/openssh
+
+# dh_apport would be neater, but at the time of writing it isn't in unstable
+# yet.
+debian/numa-openssh-server.apport => opt/numa/share/apport/package-hooks/numa-openssh-server.py

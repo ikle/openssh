@@ -1,0 +1,179 @@
+From 50b8f762562c2bdfeec9366e59f15f4aad22f88f Mon Sep 17 00:00:00 2001
+From: "Alexei A. Smekalkine" <ikle@ikle.ru>
+Date: Fri, 27 Nov 2020 16:21:37 +0300
+Subject: [PATCH 4/8] Add OpenSSL Envelope API helpers
+
+---
+ Makefile.in |   2 +-
+ evp.c       | 104 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ evp.h       |  34 ++++++++++++++++++++
+ 3 files changed, 139 insertions(+), 1 deletion(-)
+ create mode 100644 evp.c
+ create mode 100644 evp.h
+
+diff --git a/Makefile.in b/Makefile.in
+index ca71f9e..48ddf25 100644
+--- a/Makefile.in
++++ b/Makefile.in
+@@ -104,7 +104,7 @@ LIBSSH_OBJS=${LIBOPENSSH_OBJS} \
+ 	poly1305.o chacha.o cipher-chachapoly.o cipher-chachapoly-libcrypto.o \
+ 	ssh-ed25519.o digest-openssl.o digest-libc.o \
+ 	hmac.o sc25519.o ge25519.o fe25519.o ed25519.o verify.o hash.o \
+-	gost.o \
++	gost.o evp.o \
+ 	kex.o kexdh.o kexgex.o kexecdh.o kexc25519.o \
+ 	kexgexc.o kexgexs.o \
+ 	sntrup4591761.o kexsntrup4591761x25519.o kexgen.o \
+diff --git a/evp.c b/evp.c
+new file mode 100644
+index 0000000..8bc0cde
+--- /dev/null
++++ b/evp.c
+@@ -0,0 +1,104 @@
++/*
++ * OpenSSL Envelope API Helpers
++ *
++ * Copyright (c) 2011-2020 Alexei A. Smekalkine <ikle@ikle.ru>
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ */
++
++#include "includes.h"
++
++#if defined (WITH_OPENSSL) && defined (OPENSSL_HAS_ECC)
++
++#include "evp.h"
++
++#if OPENSSL_VERSION_NUMBER < 0x10100000L
++
++#define EVP_MD_CTX_new()       EVP_MD_CTX_create()
++#define EVP_MD_CTX_free(o)     EVP_MD_CTX_destroy(o)
++
++#endif
++
++/*
++ * Sign data with key and store signature into sig field. Returns size
++ * of generated signatute or zero on error.
++ */
++size_t
++evp_sign(EVP_PKEY *key, const void *data, size_t size, void *sig, size_t len)
++{
++	EVP_MD_CTX *c;
++	size_t siglen = len;
++	int ok;
++
++	if ((c = EVP_MD_CTX_new()) == NULL)
++		return 0;
++
++	ok = EVP_DigestSignInit(c, NULL, NULL, NULL, key) == 1 &&
++	     EVP_DigestSignUpdate(c, data, size)          == 1 &&
++	     EVP_DigestSignFinal(c, sig, &siglen)         == 1;
++
++	EVP_MD_CTX_free(c);
++	return ok ? siglen : 0;
++}
++
++/*
++ * Verify data with supplied key and signatute. Returns non-zero on
++ * success or zero on error.
++ */
++int
++evp_verify(EVP_PKEY *key, const void *data, size_t size,
++	   const void *sig, size_t len)
++{
++	EVP_MD_CTX *c;
++	int ok;
++
++	if ((c = EVP_MD_CTX_new()) == NULL)
++		return 0;
++
++	ok = EVP_DigestVerifyInit(c, NULL, NULL, NULL, key) == 1 &&
++	     EVP_DigestVerifyUpdate(c, data, size)          == 1 &&
++	     EVP_DigestVerifyFinal(c, sig, len)             == 1;
++
++	EVP_MD_CTX_free(c);
++	return ok;
++}
++
++/*
++ * Creates Elliptic Curve key for specified algorithm nid and curve nid
++ */
++EC_KEY *
++EC_KEY_new_by_curve_name_ng(int algo, int curve)
++{
++	EVP_PKEY_CTX *c;
++	EVP_PKEY *pkey = NULL;
++	int ok;
++	EC_KEY *key;
++
++	if (algo == 0)
++		return EC_KEY_new_by_curve_name(curve);
++
++	if ((c = EVP_PKEY_CTX_new_id(algo, NULL)) == NULL)
++		return NULL;
++
++	ok = EVP_PKEY_paramgen_init(c) == 1 &&
++	     EVP_PKEY_CTX_ctrl(c, -1, -1, EVP_PKEY_CTRL_EC_PARAMGEN_CURVE_NID,
++			       curve, NULL) > 0 &&
++	     EVP_PKEY_paramgen(c, &pkey) == 1;
++
++	EVP_PKEY_CTX_free(c);
++
++	if (!ok)
++		return NULL;
++
++	/*
++	 * We can not use EVP_PKEY_get1_EC_KEY here: for some algorithms
++	 * pkey->type != EVP_PKEY_EC. GOST EC key as an example. Thus, get
++	 * it directly and increment reference.
++	 */
++	key = EVP_PKEY_get0(pkey);
++	EC_KEY_up_ref(key);
++	EVP_PKEY_free(pkey);
++	return key;
++}
++
++#endif  /* WITH_OPENSSL and OPENSSL_HAS_ECC */
+diff --git a/evp.h b/evp.h
+new file mode 100644
+index 0000000..c4b9528
+--- /dev/null
++++ b/evp.h
+@@ -0,0 +1,34 @@
++/*
++ * OpenSSL Envelope API Helpers
++ *
++ * Copyright (c) 2011-2020 Alexei A. Smekalkine <ikle@ikle.ru>
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ */
++
++#ifndef EVP_H
++#define EVP_H  1
++
++#include <openssl/ec.h>
++#include <openssl/evp.h>
++
++/*
++ * Sign data with key and store signature into sig field. Returns size
++ * of generated signatute or zero on error.
++ */
++size_t evp_sign(EVP_PKEY *key, const void *data, size_t size,
++		void *sig, size_t len);
++
++/*
++ * Verify data with supplied key and signatute. Returns non-zero on
++ * success or zero on error.
++ */
++int evp_verify(EVP_PKEY *key, const void *data, size_t size,
++	       const void *sig, size_t len);
++
++/*
++ * Creates Elliptic Curve key for specified algorithm nid and curve nid
++ */
++EC_KEY *EC_KEY_new_by_curve_name_ng(int algo, int curve);
++
++#endif  /* EVP_H */
+-- 
+2.11.0
+

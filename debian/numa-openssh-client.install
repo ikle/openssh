@@ -1,0 +1,36 @@
+#! /usr/bin/dh-exec
+
+etc/numa-ssh/ssh_config
+opt/numa/bin/scp
+opt/numa/bin/sftp
+opt/numa/bin/ssh
+opt/numa/bin/ssh-add
+opt/numa/bin/ssh-agent
+opt/numa/bin/ssh-keygen
+opt/numa/bin/ssh-keyscan
+opt/numa/lib/openssh/ssh-keysign
+opt/numa/lib/openssh/ssh-pkcs11-helper
+opt/numa/lib/openssh/ssh-sk-helper
+opt/numa/share/man/man1/scp.1
+opt/numa/share/man/man1/sftp.1
+opt/numa/share/man/man1/ssh-add.1
+opt/numa/share/man/man1/ssh-agent.1
+opt/numa/share/man/man1/ssh-keygen.1
+opt/numa/share/man/man1/ssh-keyscan.1
+opt/numa/share/man/man1/ssh.1
+opt/numa/share/man/man5/ssh_config.5
+opt/numa/share/man/man8/ssh-keysign.8
+opt/numa/share/man/man8/ssh-pkcs11-helper.8
+opt/numa/share/man/man8/ssh-sk-helper.8
+
+contrib/ssh-copy-id opt/numa/bin
+debian/ssh-argv0 opt/numa/bin
+
+debian/agent-launch opt/numa/lib/openssh
+
+# dh_apport would be neater, but at the time of writing it isn't in unstable
+# yet.
+debian/numa-openssh-client.apport => opt/numa/share/apport/package-hooks/numa-openssh-client.py
+
+# systemd user unit (only used under sessions)
+debian/systemd/numa-ssh-agent.service usr/lib/systemd/user

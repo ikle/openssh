@@ -1,0 +1,50 @@
+--- a/pathnames.h
++++ b/pathnames.h
+@@ -57,7 +57,9 @@
+  * The directory in user's home directory in which the files reside. The
+  * directory should be world-readable (though not all files are).
+  */
++#ifndef _PATH_SSH_USER_DIR
+ #define _PATH_SSH_USER_DIR		".ssh"
++#endif
+ 
+ /*
+  * Per-user file containing host keys of known hosts.  This file need not be
+--- a/Makefile.in
++++ b/Makefile.in
+@@ -25,12 +25,14 @@
+ SSH_KEYSIGN=$(libexecdir)/ssh-keysign
+ SSH_PKCS11_HELPER=$(libexecdir)/ssh-pkcs11-helper
+ SSH_SK_HELPER=$(libexecdir)/ssh-sk-helper
++SSH_USER_DIR=@SSH_USER_DIR@
+ PRIVSEP_PATH=@PRIVSEP_PATH@
+ SSH_PRIVSEP_USER=@SSH_PRIVSEP_USER@
+ STRIP_OPT=@STRIP_OPT@
+ TEST_SHELL=@TEST_SHELL@
+ 
+ PATHS= -DSSHDIR=\"$(sysconfdir)\" \
++	-D_PATH_SSH_USER_DIR=\"$(SSH_USER_DIR)\" \
+ 	-D_PATH_SSH_PROGRAM=\"$(SSH_PROGRAM)\" \
+ 	-D_PATH_SSH_ASKPASS_DEFAULT=\"$(ASKPASS_PROGRAM)\" \
+ 	-D_PATH_SFTP_SERVER=\"$(SFTP_SERVER)\" \
+--- a/configure.ac
++++ b/configure.ac
+@@ -4707,6 +4707,18 @@
+ 
+ # Looking for programs, paths and files
+ 
++SSH_USER_DIR=.ssh
++AC_ARG_WITH([ssh-user-dir],
++	[  --with-ssh-user-dir=xxx User configuration directory (default=.ssh)],
++	[
++		if test -n "$withval"  &&  test "x$withval" != "xno"  &&  \
++		    test "x${withval}" != "xyes"; then
++			SSH_USER_DIR=$withval
++		fi
++	]
++)
++AC_SUBST([SSH_USER_DIR])
++
+ PRIVSEP_PATH=/var/empty
+ AC_ARG_WITH([privsep-path],
+ 	[  --with-privsep-path=xxx Path for privilege separation chroot (default=/var/empty)],

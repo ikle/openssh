@@ -1,0 +1,213 @@
+From 133c7a4abe052845d7add1de8c1e9bba10763821 Mon Sep 17 00:00:00 2001
+From: "Alexei A. Smekalkine" <ikle@ikle.ru>
+Date: Thu, 26 Nov 2020 06:54:43 +0300
+Subject: [PATCH 3/8] cipher: add support for GOST cipher algorithms
+
+The following two groups of cipher algorithms have been added:
+
+*  GOST 28147-89, GOST R 34.12-2015 256-bit key, 64-bit block:
+
+   *  gost89-cbc -- CBC mode;
+   *  gost89-cfb -- CFB mode;
+   *  gost89-ofb -- OFB mode;
+   *  gost89-ctr -- CTR mode.
+
+*  GOST R 34.12-2015 256-bit key, 128-bit block aka Kuznechik:
+
+   *  kuznechik-cbc -- CBC mode;
+   *  kuznechik-cfb -- CFB mode;
+   *  kuznechik-ctr -- CTR mode;
+   *  kuznechik-ofb -- OFB mode.
+
+Note that the key meshing mode is incompatible with the current procedure
+for moving the state after authentication: to restore the state, it is not
+enough to know the initial key and the current initialization vector. We
+disable key and IV meshing mode where it is enabled by default.
+
+The name of GOST R 34.12-2015 128-bit block cipher has been transliterated
+from Cyrillic to Latin according to the ISO/IEC 7501-1-2013 standard in
+force in Russia: do not try to replace it with "Kuznyechik" -- that's
+a mistake in standard.
+---
+ cipher.c     | 15 +++++++++++++++
+ gost.c       | 45 +++++++++++++++++++++++++++++++++++++++++++++
+ gost.h       | 50 ++++++++++++++++++++++++++++++++++++++++++++++++++
+ myproposal.h |  2 ++
+ 4 files changed, 112 insertions(+)
+
+diff --git a/cipher.c b/cipher.c
+index 933fe9f..3f1d8ce 100644
+--- a/cipher.c
++++ b/cipher.c
+@@ -44,6 +44,7 @@
+ #include <stdio.h>
+ 
+ #include "cipher.h"
++#include "gost.h"
+ #include "misc.h"
+ #include "sshbuf.h"
+ #include "ssherr.h"
+@@ -75,6 +76,7 @@ struct sshcipher {
+ #define CFLAG_CHACHAPOLY	(1<<1)
+ #define CFLAG_AESCTR		(1<<2)
+ #define CFLAG_NONE		(1<<3)
++#define CFLAG_PLAIN		(1<<4)     /* request plain cipher mode    */
+ #define CFLAG_INTERNAL		CFLAG_NONE /* Don't use "none" for packets */
+ #ifdef WITH_OPENSSL
+ 	const EVP_CIPHER	*(*evptype)(void);
+@@ -102,6 +104,14 @@ static const struct sshcipher ciphers[] = {
+ 	{ "aes256-gcm@openssh.com",
+ 				16, 32, 12, 16, 0, EVP_aes_256_gcm },
+ # endif /* OPENSSL_HAVE_EVPGCM */
++	{ "gost89-cbc",		8,  32, 0, 0, CFLAG_CBC,   EVP_gost89_cbc },
++	{ "gost89-cfb",		8,  32, 0, 0, CFLAG_PLAIN, EVP_gost89_cfb },
++	{ "gost89-ctr",		8,  32, 0, 0,           0, EVP_gost89_ctr },
++	{ "gost89-ofb",		8,  32, 0, 0, CFLAG_PLAIN, EVP_gost89_ofb },
++	{ "kuznechik-cbc",	16, 32, 0, 0, CFLAG_CBC,   EVP_kuznechik_cbc },
++	{ "kuznechik-cfb",	16, 32, 0, 0,           0, EVP_kuznechik_cfb },
++	{ "kuznechik-ctr",	16, 32, 0, 0,           0, EVP_kuznechik_ctr },
++	{ "kuznechik-ofb",	16, 32, 0, 0,           0, EVP_kuznechik_ofb },
+ #else
+ 	{ "aes128-ctr",		16, 16, 0, 0, CFLAG_AESCTR, NULL },
+ 	{ "aes192-ctr",		16, 24, 0, 0, CFLAG_AESCTR, NULL },
+@@ -330,6 +340,11 @@ cipher_init(struct sshcipher_ctx **ccp, const struct sshcipher *cipher,
+ 		ret = SSH_ERR_LIBCRYPTO_ERROR;
+ 		goto out;
+ 	}
++	if ((cc->cipher->flags & CFLAG_PLAIN) != 0) {
++		/* NOTE: no need to check status */
++		EVP_CIPHER_CTX_ctrl(cc->evp, EVP_CTRL_KEY_MESH, 0, NULL);
++		EVP_CIPHER_CTX_ctrl(cc->evp, EVP_CTRL_AEAD_SET_TAG, 1, "plain");
++	}
+ 	ret = 0;
+ #endif /* WITH_OPENSSL */
+  out:
+diff --git a/gost.c b/gost.c
+index 8dd52ef..84df261 100644
+--- a/gost.c
++++ b/gost.c
+@@ -24,4 +24,49 @@ DEFINE_DIGEST(gosthash, "md_gost94")
+ DEFINE_DIGEST(stribog_256, "md_gost12_256")
+ DEFINE_DIGEST(stribog_512, "md_gost12_512")
+ 
++#define DEFINE_CIPHER(name, algo)				\
++const EVP_CIPHER *						\
++EVP_##name(void)						\
++{								\
++	return EVP_get_cipherbyname(algo);			\
++}
++
++DEFINE_CIPHER(gost89_cbc, "gost89-cbc")
++DEFINE_CIPHER(gost89_cfb, "gost89")      /* CFB + key meshing        */
++DEFINE_CIPHER(gost89_cnt, "gost89-cnt")  /* OFB + key and IV meshing */
++DEFINE_CIPHER(gost89_ctr, "gost89-ctr")
++
++const EVP_CIPHER *
++EVP_gost89_ofb(void)  /* CNT + guarantee that we can turn off meshing */
++{
++	static const EVP_CIPHER *algo;
++	EVP_CIPHER_CTX *c;
++
++	if (algo != NULL)
++		return algo;
++
++	if ((algo = EVP_gost89_cnt()) == NULL)
++		return NULL;
++
++	if ((c = EVP_CIPHER_CTX_new()) == NULL)
++		goto no_ctx;
++
++	if (!EVP_CipherInit (c, algo, NULL, NULL, 1) ||
++	    EVP_CIPHER_CTX_ctrl(c, EVP_CTRL_AEAD_SET_TAG, 1, "plain") <= 0)
++		goto no_plain;
++
++	EVP_CIPHER_CTX_free(c);
++	return algo;
++no_plain:
++	EVP_CIPHER_CTX_free(c);
++no_ctx:
++	algo = NULL;
++	return NULL;
++}
++
++DEFINE_CIPHER(kuznechik_cbc, "kuznyechik-cbc")
++DEFINE_CIPHER(kuznechik_cfb, "kuznyechik-cfb")
++DEFINE_CIPHER(kuznechik_ctr, "kuznyechik-ctr")
++DEFINE_CIPHER(kuznechik_ofb, "kuznyechik-ofb")
++
+ #endif  /* WITH_OPENSSL */
+diff --git a/gost.h b/gost.h
+index 86f959a..80393b9 100644
+--- a/gost.h
++++ b/gost.h
+@@ -43,4 +43,54 @@ DECLARE_DIGEST(gosthash)
+ DECLARE_DIGEST(stribog_256)
+ DECLARE_DIGEST(stribog_512)
+ 
++/*
++ * The following two groups of cipher algorithms have been added:
++ *
++ * *  GOST 28147-89, GOST R 34.12-2015 256-bit key, 64-bit block:
++ *
++ *    *  gost89-cbc -- CBC mode;
++ *    *  gost89-cfb -- CFB mode with key meshing;
++ *    *  gost89-cnt -- OFB mode with key and IV meshing.
++ *    *  gost89-ctr -- CTR mode;
++ *    *  gost89-ofb -- CNT + guarantee that we can turn off meshing.
++ *
++ * *  GOST R 34.12-2015 256-bit key, 128-bit block aka Kuznechik:
++ *
++ *    *  kuznechik-cbc -- CBC mode;
++ *    *  kuznechik-cfb -- CFB mode;
++ *    *  kuznechik-ctr -- CTR mode;
++ *    *  kuznechik-ofb -- OFB mode.
++ *
++ * Note that the key meshing mode is incompatible with the current procedure
++ * for moving the state after authentication: to restore the state, it is
++ * not enough to know the initial key and the current initialization vector.
++ * We need to disable key and IV meshing mode where it is enabled by default.
++ *
++ * The name of GOST R 34.12-2015 128-bit block cipher has been trans-
++ * literated from Cyrillic to Latin according to the ISO/IEC 7501-1-2013
++ * standard in force in Russia: do not try to replace it with "Kuznyechik"
++ * -- that's a mistake in standard.
++ */
++
++#ifndef EVP_CTRL_AEAD_SET_TAG
++#define EVP_CTRL_AEAD_SET_TAG	0x11
++#endif
++
++#ifndef EVP_CTRL_KEY_MESH
++#define EVP_CTRL_KEY_MESH	0x20
++#endif
++
++#define DECLARE_CIPHER(name)	const EVP_CIPHER *EVP_##name(void);
++
++DECLARE_CIPHER(gost89_cbc)
++DECLARE_CIPHER(gost89_cfb)  /* CFB + key meshing        */
++DECLARE_CIPHER(gost89_cnt)  /* OFB + key and IV meshing */
++DECLARE_CIPHER(gost89_ctr)
++DECLARE_CIPHER(gost89_ofb)  /* CNT + guarantee that we can turn off meshing */
++
++DECLARE_CIPHER(kuznechik_cbc)
++DECLARE_CIPHER(kuznechik_cfb)
++DECLARE_CIPHER(kuznechik_ctr)
++DECLARE_CIPHER(kuznechik_ofb)
++
+ #endif  /* GOST_H */
+diff --git a/myproposal.h b/myproposal.h
+index c813763..d22b584 100644
+--- a/myproposal.h
++++ b/myproposal.h
+@@ -60,6 +60,8 @@
+ #define	KEX_SERVER_ENCRYPT \
+ 	"chacha20-poly1305@openssh.com," \
+ 	"aes128-ctr,aes192-ctr,aes256-ctr," \
++	"kuznechik-ofb,kuznechik-cfb,kuznechik-ctr,kuznechik-cbc," \
++	"gost89-ofb,gost89-cfb,gost89-ctr,gost89-cbc," \
+ 	"aes128-gcm@openssh.com,aes256-gcm@openssh.com"
+ 
+ #define KEX_CLIENT_ENCRYPT KEX_SERVER_ENCRYPT
+-- 
+2.11.0
+

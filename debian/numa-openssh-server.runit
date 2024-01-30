@@ -1,0 +1,1 @@
+debian/numa-openssh-server.numa-ssh.runscript logscript,name=numa-ssh

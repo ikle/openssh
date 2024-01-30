@@ -1,0 +1,170 @@
+From 8aff38adb2dde0f00dd3365a12de891b55957f8c Mon Sep 17 00:00:00 2001
+From: "Alexei A. Smekalkine" <ikle@ikle.ru>
+Date: Thu, 26 Nov 2020 06:11:47 +0300
+Subject: [PATCH 1/8] Add support for algorithms provided by an engine
+
+Some algorithms may be provided by the OpenSSL engine, so they may not
+be available in the current configuration. Moreover, algorithms can be
+implemented in hardware that may be temporarily unavailable. Let's just
+ignore the missing algorithms.
+
+This change does not affect the algorithms, the implementation of which
+is built into OpenSSH and the crypto-library used.
+---
+ cipher.c         | 12 ++++++++++++
+ digest-openssl.c | 13 ++++++++++++-
+ kex.c            | 24 ++++++++++++++++++++++++
+ mac.c            | 20 ++++++++++++++++++++
+ 4 files changed, 68 insertions(+), 1 deletion(-)
+
+diff --git a/cipher.c b/cipher.c
+index 8195199..933fe9f 100644
+--- a/cipher.c
++++ b/cipher.c
+@@ -116,6 +116,16 @@ static const struct sshcipher ciphers[] = {
+ 
+ /*--*/
+ 
++/*
++ * The algorithm may be provided by an engine, so it may not be available
++ * in the current configuration. Returns non-zero if available.
++ */
++static int
++cipher_available(const struct sshcipher *c)
++{
++	return c->evptype == NULL || c->evptype() != NULL;
++}
++
+ /* Returns a comma-separated list of supported ciphers. */
+ char *
+ cipher_alg_list(char sep, int auth_only)
+@@ -129,6 +139,8 @@ cipher_alg_list(char sep, int auth_only)
+ 			continue;
+ 		if (auth_only && c->auth_len == 0)
+ 			continue;
++		if (!cipher_available(c))
++			continue;
+ 		if (ret != NULL)
+ 			ret[rlen++] = sep;
+ 		nlen = strlen(c->name);
+diff --git a/digest-openssl.c b/digest-openssl.c
+index dbbea42..6deeeec 100644
+--- a/digest-openssl.c
++++ b/digest-openssl.c
+@@ -64,6 +64,16 @@ const struct ssh_digest digests[] = {
+ 	{ -1,			NULL,		0,	NULL },
+ };
+ 
++/*
++ * The algorithm may be provided by an engine, so it may not be available
++ * in the current configuration. Returns non-zero if available.
++ */
++static int
++ssh_digest_available(const struct ssh_digest *d)
++{
++	return d->mdfunc() != NULL;
++}
++
+ static const struct ssh_digest *
+ ssh_digest_by_alg(int alg)
+ {
+@@ -73,7 +83,8 @@ ssh_digest_by_alg(int alg)
+ 		return NULL;
+ 	if (digests[alg].mdfunc == NULL)
+ 		return NULL;
+-	return &(digests[alg]);
++
++	return ssh_digest_available(digests + alg) ? digests + alg : NULL;
+ }
+ 
+ int
+diff --git a/kex.c b/kex.c
+index 763c455..d237bf2 100644
+--- a/kex.c
++++ b/kex.c
+@@ -40,6 +40,7 @@
+ #ifdef WITH_OPENSSL
+ #include <openssl/crypto.h>
+ #include <openssl/dh.h>
++#include <openssl/ec.h>
+ #endif
+ 
+ #include "ssh.h"
+@@ -134,6 +135,27 @@ static const struct kexalg gss_kexalgs[] = {
+ 	{ NULL, 0, -1, -1},
+ };
+ 
++/*
++ * The algorithm may be provided by an engine, so it may not be available
++ * in the current configuration. Returns non-zero if available.
++ */
++static int
++kex_alg_available(const struct kexalg *k)
++{
++#ifdef WITH_OPENSSL
++	EC_KEY *key;
++
++	if (k->ec_nid > 0) {
++		key = EC_KEY_new_by_curve_name(k->ec_nid);
++		if (key == NULL)
++			return 0;
++
++		EC_KEY_free(key);
++	}
++#endif
++	return ssh_digest_alg_name(k->hash_alg) != NULL;
++}
++
+ static char *
+ kex_alg_list_internal(char sep, const struct kexalg *algs)
+ {
+@@ -142,6 +164,8 @@ kex_alg_list_internal(char sep, const struct kexalg *algs)
+ 	const struct kexalg *k;
+ 
+ 	for (k = algs; k->name != NULL; k++) {
++		if (!kex_alg_available(k))
++			continue;
+ 		if (ret != NULL)
+ 			ret[rlen++] = sep;
+ 		nlen = strlen(k->name);
+diff --git a/mac.c b/mac.c
+index f3dda66..7a3263e 100644
+--- a/mac.c
++++ b/mac.c
+@@ -79,6 +79,24 @@ static const struct macalg macs[] = {
+ 	{ NULL,					0, 0, 0, 0, 0, 0 }
+ };
+ 
++/*
++ * The algorithm may be provided by an engine, so it may not be available
++ * in the current configuration. Returns non-zero if available.
++ */
++static int
++mac_alg_available(const struct macalg *m)
++{
++	switch (m->type) {
++	case SSH_DIGEST:
++		return ssh_digest_alg_name(m->alg) != NULL;
++	case SSH_UMAC:
++	case SSH_UMAC128:
++		return 1;  /* UMAC compiled-in, assume AES is available */
++	}
++
++	return 0;
++}
++
+ /* Returns a list of supported MACs separated by the specified char. */
+ char *
+ mac_alg_list(char sep)
+@@ -88,6 +106,8 @@ mac_alg_list(char sep)
+ 	const struct macalg *m;
+ 
+ 	for (m = macs; m->name != NULL; m++) {
++		if (!mac_alg_available(m))
++			continue;
+ 		if (ret != NULL)
+ 			ret[rlen++] = sep;
+ 		nlen = strlen(m->name);
+-- 
+2.11.0
+

@@ -1,0 +1,203 @@
+From 1c7f543105903a7d0e58b05d26fb82c6d84214dc Mon Sep 17 00:00:00 2001
+From: "Alexei A. Smekalkine" <ikle@ikle.ru>
+Date: Thu, 26 Nov 2020 06:11:47 +0300
+Subject: [PATCH 2/8] mac: add support for HMAC with GOST hash algorithms
+
+The following three message digest algorithms have been added along
+with corresponding HMAC variants:
+
+*  gosthash    -- GOST R 34.11-94, 256 bit;
+*  stribog-256 -- GOST R 34.11-2012, 256 bit;
+*  stribog-512 -- GOST R 34.11-2012, 512 bit.
+
+HMAC with GOST R 34.11-94 aka Gosthash is not enabled by default, since
+the latter is officially considered obsolete. However, it is still widely
+used and has no known vulnerabilities. Moreover, it uses internally the
+GOST 28147-89 cipher algorithm, which is adopted as part of the new GOST
+R 34.12-2015 standard under the name Magma (256 bit key size, 64 bit
+block size), which also has no known vulnerabilities.
+
+The main reason for exclusion Gosthash from the new standard is its
+significantly lower operating speed compared to the new Stribog algorithm.
+
+The Stribog algorithm with a digest size of 256 bits is, in fact, the
+same Stribog algorithm with a digest size of 512 bits with a different
+IV and a truncated lower half of the output value and nothing more.
+---
+ Makefile.in      |  1 +
+ digest-openssl.c |  5 +++++
+ digest.h         |  5 ++++-
+ gost.c           | 27 +++++++++++++++++++++++++++
+ gost.h           | 46 ++++++++++++++++++++++++++++++++++++++++++++++
+ mac.c            |  3 +++
+ myproposal.h     |  2 ++
+ 7 files changed, 88 insertions(+), 1 deletion(-)
+ create mode 100644 gost.c
+ create mode 100644 gost.h
+
+diff --git a/Makefile.in b/Makefile.in
+index 73e56aa..ca71f9e 100644
+--- a/Makefile.in
++++ b/Makefile.in
+@@ -104,6 +104,7 @@ LIBSSH_OBJS=${LIBOPENSSH_OBJS} \
+ 	poly1305.o chacha.o cipher-chachapoly.o cipher-chachapoly-libcrypto.o \
+ 	ssh-ed25519.o digest-openssl.o digest-libc.o \
+ 	hmac.o sc25519.o ge25519.o fe25519.o ed25519.o verify.o hash.o \
++	gost.o \
+ 	kex.o kexdh.o kexgex.o kexecdh.o kexc25519.o \
+ 	kexgexc.o kexgexs.o \
+ 	sntrup4591761.o kexsntrup4591761x25519.o kexgen.o \
+diff --git a/digest-openssl.c b/digest-openssl.c
+index 6deeeec..9674ab5 100644
+--- a/digest-openssl.c
++++ b/digest-openssl.c
+@@ -28,6 +28,8 @@
+ 
+ #include "openbsd-compat/openssl-compat.h"
+ 
++#include "gost.h"
++
+ #include "sshbuf.h"
+ #include "digest.h"
+ #include "ssherr.h"
+@@ -61,6 +63,9 @@ const struct ssh_digest digests[] = {
+ 	{ SSH_DIGEST_SHA256,	"SHA256", 	32,	EVP_sha256 },
+ 	{ SSH_DIGEST_SHA384,	"SHA384",	48,	EVP_sha384 },
+ 	{ SSH_DIGEST_SHA512,	"SHA512", 	64,	EVP_sha512 },
++	{ SSH_DIGEST_GOSTHASH,	"gosthash", 	32,	EVP_gosthash },
++	{ SSH_DIGEST_STRIBOG_256,"stribog-256",	32,	EVP_stribog_256 },
++	{ SSH_DIGEST_STRIBOG_512,"stribog-512",	64,	EVP_stribog_512 },
+ 	{ -1,			NULL,		0,	NULL },
+ };
+ 
+diff --git a/digest.h b/digest.h
+index 274574d..ddcf042 100644
+--- a/digest.h
++++ b/digest.h
+@@ -27,7 +27,10 @@
+ #define SSH_DIGEST_SHA256	2
+ #define SSH_DIGEST_SHA384	3
+ #define SSH_DIGEST_SHA512	4
+-#define SSH_DIGEST_MAX		5
++#define SSH_DIGEST_GOSTHASH	5
++#define SSH_DIGEST_STRIBOG_256	6
++#define SSH_DIGEST_STRIBOG_512	7
++#define SSH_DIGEST_MAX		8
+ 
+ struct sshbuf;
+ struct ssh_digest_ctx;
+diff --git a/gost.c b/gost.c
+new file mode 100644
+index 0000000..8dd52ef
+--- /dev/null
++++ b/gost.c
+@@ -0,0 +1,27 @@
++/*
++ * GOST Algorithms Support
++ *
++ * Copyright (c) 2011-2020 Alexei A. Smekalkine <ikle@ikle.ru>
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ */
++
++#include "includes.h"
++
++#ifdef WITH_OPENSSL
++
++#include "gost.h"
++
++#define DEFINE_DIGEST(name, algo)				\
++const EVP_MD *							\
++EVP_##name(void)						\
++{								\
++	return EVP_get_digestbyname(algo);			\
++}
++
++DEFINE_DIGEST(gosthash, "md_gost94")
++
++DEFINE_DIGEST(stribog_256, "md_gost12_256")
++DEFINE_DIGEST(stribog_512, "md_gost12_512")
++
++#endif  /* WITH_OPENSSL */
+diff --git a/gost.h b/gost.h
+new file mode 100644
+index 0000000..86f959a
+--- /dev/null
++++ b/gost.h
+@@ -0,0 +1,46 @@
++/*
++ * GOST Algorithms Support
++ *
++ * Copyright (c) 2011-2020 Alexei A. Smekalkine <ikle@ikle.ru>
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ */
++
++#ifndef GOST_H
++#define GOST_H  1
++
++#include <openssl/evp.h>
++
++/*
++ * The following three message digest algorithms have been added:
++ *
++ * *  gosthash    -- GOST R 34.11-94, 256 bit;
++ * *  stribog-256 -- GOST R 34.11-2012, 256 bit;
++ * *  stribog-512 -- GOST R 34.11-2012, 512 bit.
++ *
++ * GOST R 34.11-94 aka Gosthash is officially considered obsolete. However,
++ * it is still widely used and has no known vulnerabilities. Moreover, it
++ * uses internally the GOST 28147-89 cipher algorithm, which is adopted as
++ * part of the new GOST R 34.12-2015 standard under the name Magma (256 bit
++ * key size, 64 bit block size), which also has no known vulnerabilities.
++ *
++ * The main reason for exclusion Gosthash from the new standard is its
++ * significantly lower operating speed compared to the new Stribog algorithm.
++ *
++ * The Stribog algorithm with a digest size of 256 bits is, in fact, the
++ * same Stribog algorithm with a digest size of 512 bits with a different
++ * IV and a truncated lower half of the output value and nothing more.
++ *
++ * Stribog is the name of Prince Oleg's horse from the saga of St. Oleg.
++ * The name has been transliterated from Cyrillic to Latin according to the
++ * ISO/IEC 7501-1-2013 standard in force in Russia: do not try to replace
++ * it with English-like transcription "Streebog" -- this is wrong.
++ */
++
++#define DECLARE_DIGEST(name)	const EVP_MD *EVP_##name(void);
++
++DECLARE_DIGEST(gosthash)
++DECLARE_DIGEST(stribog_256)
++DECLARE_DIGEST(stribog_512)
++
++#endif  /* GOST_H */
+diff --git a/mac.c b/mac.c
+index 7a3263e..d6335aa 100644
+--- a/mac.c
++++ b/mac.c
+@@ -61,6 +61,9 @@ static const struct macalg macs[] = {
+ 	{ "hmac-sha1-96",			SSH_DIGEST, SSH_DIGEST_SHA1, 96, 0, 0, 0 },
+ 	{ "hmac-sha2-256",			SSH_DIGEST, SSH_DIGEST_SHA256, 0, 0, 0, 0 },
+ 	{ "hmac-sha2-512",			SSH_DIGEST, SSH_DIGEST_SHA512, 0, 0, 0, 0 },
++	{ "hmac-gosthash",			SSH_DIGEST, SSH_DIGEST_GOSTHASH, 0, 0, 0, 0 },
++	{ "hmac-stribog-256",			SSH_DIGEST, SSH_DIGEST_STRIBOG_256, 0, 0, 0, 0 },
++	{ "hmac-stribog-512",			SSH_DIGEST, SSH_DIGEST_STRIBOG_512, 0, 0, 0, 0 },
+ 	{ "hmac-md5",				SSH_DIGEST, SSH_DIGEST_MD5, 0, 0, 0, 0 },
+ 	{ "hmac-md5-96",			SSH_DIGEST, SSH_DIGEST_MD5, 96, 0, 0, 0 },
+ 	{ "umac-64@openssh.com",		SSH_UMAC, 0, 0, 128, 64, 0 },
+diff --git a/myproposal.h b/myproposal.h
+index 5312e60..c813763 100644
+--- a/myproposal.h
++++ b/myproposal.h
+@@ -74,6 +74,8 @@
+ 	"umac-128@openssh.com," \
+ 	"hmac-sha2-256," \
+ 	"hmac-sha2-512," \
++	"hmac-stribog-256," \
++	"hmac-stribog-512," \
+ 	"hmac-sha1"
+ 
+ #define KEX_CLIENT_MAC KEX_SERVER_MAC
+-- 
+2.11.0
+

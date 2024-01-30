@@ -1,0 +1,553 @@
+From 10505d6fc66bf86fa7cdf14174990af3bb10e2de Mon Sep 17 00:00:00 2001
+From: "Alexei A. Smekalkine" <ikle@ikle.ru>
+Date: Fri, 27 Nov 2020 17:33:20 +0300
+Subject: [PATCH 6/8] Add GOST Elliptic Curve Digital Signature helpers
+
+---
+ Makefile.in  |   2 +-
+ ssh-ecgost.c | 454 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ ssh-ecgost.h |  44 ++++++
+ sshkey.h     |   2 +
+ 4 files changed, 501 insertions(+), 1 deletion(-)
+ create mode 100644 ssh-ecgost.c
+ create mode 100644 ssh-ecgost.h
+
+diff --git a/Makefile.in b/Makefile.in
+index 48ddf25..f36d1b6 100644
+--- a/Makefile.in
++++ b/Makefile.in
+@@ -104,7 +104,7 @@ LIBSSH_OBJS=${LIBOPENSSH_OBJS} \
+ 	poly1305.o chacha.o cipher-chachapoly.o cipher-chachapoly-libcrypto.o \
+ 	ssh-ed25519.o digest-openssl.o digest-libc.o \
+ 	hmac.o sc25519.o ge25519.o fe25519.o ed25519.o verify.o hash.o \
+-	gost.o evp.o \
++	gost.o evp.o ssh-ecgost.o \
+ 	kex.o kexdh.o kexgex.o kexecdh.o kexc25519.o \
+ 	kexgexc.o kexgexs.o \
+ 	sntrup4591761.o kexsntrup4591761x25519.o kexgen.o \
+diff --git a/ssh-ecgost.c b/ssh-ecgost.c
+new file mode 100644
+index 0000000..0b37002
+--- /dev/null
++++ b/ssh-ecgost.c
+@@ -0,0 +1,454 @@
++/*
++ * GOST Elliptic Curve Digital Signature
++ *
++ * Copyright (c) 2011-2020 Alexei A. Smekalkine <ikle@ikle.ru>
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ */
++
++#include "includes.h"
++
++#if defined (WITH_OPENSSL) && defined (OPENSSL_HAS_ECC)
++
++#include <stdio.h>
++#include <string.h>
++
++#include <openssl/ec.h>
++#include <openssl/pem.h>
++
++#include "evp.h"
++#include "ssherr.h"
++#include "sshkey.h"
++#include "ssh-ecgost.h"
++
++/* info */
++
++struct ecgost_info {
++	const char *type;
++	int key_size, algo, curve;
++};
++
++static const struct ecgost_info ecgost_info[] = {
++#ifdef NID_id_GostR3410_2012_256
++	{ "ssh-gost2012-256-cpa", 256,
++	  NID_id_GostR3410_2012_256, NID_id_GostR3410_2001_CryptoPro_A_ParamSet },
++	{ "ssh-gost2012-256-cpb", 256,
++	  NID_id_GostR3410_2012_256, NID_id_GostR3410_2001_CryptoPro_B_ParamSet },
++	{ "ssh-gost2012-256-cpc", 256,
++	  NID_id_GostR3410_2012_256, NID_id_GostR3410_2001_CryptoPro_C_ParamSet },
++#ifdef NID_id_tc26_gost_3410_2012_512_paramSetA
++	{ "ssh-gost2012-512-tc26a", 512,
++	  NID_id_GostR3410_2012_512, NID_id_tc26_gost_3410_2012_512_paramSetA },
++	{ "ssh-gost2012-512-tc26b", 512,
++	  NID_id_GostR3410_2012_512, NID_id_tc26_gost_3410_2012_512_paramSetB },
++#endif  /* TC26 paramsets */
++#endif  /* GOST R 34.10-2012 */
++
++#ifdef NID_id_GostR3410_2001_CryptoPro_A_ParamSet
++	{ "ssh-gost2001-cpa", 256,
++	  NID_id_GostR3410_2001, NID_id_GostR3410_2001_CryptoPro_A_ParamSet },
++#endif  /* GOST R 34.10 CryptoPro Paramset */
++#ifdef NID_id_GostR3410_2001_ParamSet_cc
++	{ "ssh-gost2001-cc", 256,
++	  NID_id_GostR3410_2001, NID_id_GostR3410_2001_ParamSet_cc },
++#endif  /* GOST R 34.10 CryptoCom Paramset */
++	{},
++};
++
++static const struct ecgost_info *
++ecgost_get_info(const char *type)
++{
++	const struct ecgost_info *p;
++
++	for (p = ecgost_info; p->type != NULL; ++p)
++		if (strcmp(p->type, type) == 0)
++			return p;
++
++	return NULL;
++}
++
++static const struct ecgost_info *
++ecgost_find_info(int key_size)
++{
++	const struct ecgost_info *p;
++
++	for (p = ecgost_info; p->type != NULL; ++p)
++		if (p->key_size == key_size)
++			return p;
++
++	return NULL;
++}
++
++/* EC GOST ssh helpers */
++
++static int
++ssh_ecgost_init(struct sshkey *k, EC_KEY *key, const struct ecgost_info *info)
++{
++	k->type  = KEY_ECGOST;
++	k->ecdsa = key;
++	k->info  = info;
++	return 0;
++}
++
++static int
++ssh_ecgost_is_valid(const struct sshkey *k)
++{
++	return k->type == KEY_ECGOST && k->ecdsa != NULL && k->info != NULL;
++}
++
++static int
++ssh_ecgost_is_empty(const struct sshkey *k)
++{
++	return (k->type == KEY_ECGOST && k->ecdsa == NULL) ||
++		k->type == KEY_UNSPEC;
++}
++
++unsigned
++ssh_ecgost_name_to_bits(const char *type)
++{
++	const struct ecgost_info *info;
++
++	return (info = ecgost_get_info(type)) != NULL ? info->key_size : 0;
++}
++
++unsigned
++ssh_ecgost_key_size(const struct sshkey *k)
++{
++	const struct ecgost_info *info = k->info;
++
++	return ssh_ecgost_is_valid(k) ? info->key_size : 0;
++}
++
++int
++ssh_ecgost_equal_public(const struct sshkey *a, const struct sshkey *b)
++{
++	const EC_POINT *pa, *pb;
++
++	if (a->ecdsa == NULL || b->ecdsa == NULL)
++		return 0;
++
++	if ((pa = EC_KEY_get0_public_key(a->ecdsa)) == NULL ||
++	    (pb = EC_KEY_get0_public_key(b->ecdsa)) == NULL)
++		return 0;
++
++	if (EC_GROUP_cmp(EC_KEY_get0_group(a->ecdsa),
++			 EC_KEY_get0_group(b->ecdsa), NULL) != 0)
++		return 0;
++
++	return EC_POINT_cmp(EC_KEY_get0_group(a->ecdsa), pa, pb, NULL) == 0;
++}
++
++int
++sshbuf_put_ecgost(struct sshbuf *b, const struct sshkey *k, int header, int priv)
++{
++	const struct ecgost_info *info = k->info;
++	int r;
++
++	if (!ssh_ecgost_is_valid(k))
++		return SSH_ERR_INVALID_ARGUMENT;
++
++	if ((header && (r = sshbuf_put_cstring(b, info->type)) != 0) ||
++	    (r = sshbuf_put_eckey(b, k->ecdsa)) != 0)
++		return r;
++
++	return priv ?
++	       sshbuf_put_bignum2(b, EC_KEY_get0_private_key(k->ecdsa)) : 0;
++}
++
++static int
++sshbuf_get_ecgost_private(struct sshbuf *b, EC_KEY *key)
++{
++	BIGNUM *exponent = NULL;
++	int r;
++
++	if ((r = sshbuf_get_bignum2(b, &exponent)) != 0)
++		return r;
++
++	if (EC_KEY_set_private_key(key, exponent) != 1) {
++		BN_clear_free(exponent);
++		return SSH_ERR_LIBCRYPTO_ERROR;
++	}
++
++	BN_clear_free(exponent);
++	return sshkey_ec_validate_private(key);
++}
++
++int
++sshbuf_get_ecgost(struct sshbuf *b, const char *type, int priv,
++		  struct sshkey *res)
++{
++	const struct ecgost_info *info;
++	EC_KEY *key;
++	int r;
++
++	if (!ssh_ecgost_is_empty(res))
++		return SSH_ERR_INVALID_ARGUMENT;
++
++	if ((info = ecgost_get_info(type)) == NULL)
++		return SSH_ERR_INVALID_FORMAT;
++
++	if ((key = EC_KEY_new_by_curve_name_ng(info->algo, info->curve)) == NULL)
++		return SSH_ERR_EC_CURVE_INVALID;
++
++	if ((r = sshbuf_get_eckey(b, key)) != 0)
++		goto error;
++
++	if (sshkey_ec_validate_public(EC_KEY_get0_group(key),
++				      EC_KEY_get0_public_key(key)) != 0) {
++		r = SSH_ERR_KEY_INVALID_EC_VALUE;
++		goto error;
++	}
++
++	if (priv && (r = sshbuf_get_ecgost_private(b, key)) != 0)
++		goto error;
++
++	return ssh_ecgost_init(res, key, info);
++error:
++	EC_KEY_free(key);
++	return r;
++}
++
++int
++ssh_ecgost_get_public_key(const struct sshkey *k, struct sshkey *res)
++{
++	const struct ecgost_info *info = k->info;
++	EC_KEY *key;
++
++	if (!ssh_ecgost_is_empty(res))
++		return SSH_ERR_INVALID_ARGUMENT;
++
++	if ((key = EC_KEY_new_by_curve_name_ng(info->algo, info->curve)) == NULL)
++		return SSH_ERR_EC_CURVE_INVALID;
++
++	if (EC_KEY_set_public_key(key, EC_KEY_get0_public_key(k->ecdsa)) != 1)
++		goto no_public;
++
++	return ssh_ecgost_init(res, key, info);
++no_public:
++	EC_KEY_free(key);
++	return SSH_ERR_LIBCRYPTO_ERROR;
++}
++
++int
++ssh_ecgost_generate_private_key(unsigned bits, struct sshkey *res)
++{
++	const struct ecgost_info *info;
++	EVP_PKEY_CTX *c;
++	EVP_PKEY *pkey;
++	EC_KEY *key;
++
++	if (!ssh_ecgost_is_empty(res))
++		return SSH_ERR_INVALID_ARGUMENT;
++
++	if ((info = ecgost_find_info(bits)) == NULL)
++		return SSH_ERR_KEY_LENGTH;
++
++	if ((c = EVP_PKEY_CTX_new_id(info->algo, NULL)) == NULL)
++		return SSH_ERR_LIBCRYPTO_ERROR;
++
++	if (EVP_PKEY_keygen_init(c) != 1 ||
++	    EVP_PKEY_CTX_ctrl(c, -1, -1, EVP_PKEY_CTRL_EC_PARAMGEN_CURVE_NID,
++			      info->curve, NULL) <= 0 ||
++	    EVP_PKEY_keygen(c, &pkey) != 1)
++		goto no_key;
++
++	EVP_PKEY_CTX_free(c);
++
++	key = EVP_PKEY_get0(pkey);
++	EC_KEY_up_ref(key);
++	EVP_PKEY_free(pkey);
++
++	return ssh_ecgost_init(res, key, info);
++no_key:
++	EVP_PKEY_CTX_free(c);
++	return SSH_ERR_LIBCRYPTO_ERROR;
++}
++
++int
++ssh_ecgost_public_to_pem(const struct sshkey *k, FILE *to)
++{
++	return PEM_write_EC_PUBKEY(to, k->ecdsa);
++}
++
++int
++ssh_ecgost_private_to_pem(const struct sshkey *k, FILE *to)
++{
++	return PEM_write_ECPrivateKey(to, k->ecdsa, NULL, NULL, 0, NULL, NULL);
++}
++
++int
++ssh_ecgost_private_to_pem_bio(const struct sshkey *k, const EVP_CIPHER *cipher,
++			      const void *passphrase, size_t len, BIO *bio)
++{
++	return PEM_write_bio_ECPrivateKey(bio, k->ecdsa, cipher,
++					  (void *) passphrase, len,
++					  NULL, NULL);
++}
++
++int
++ssh_ecgost_private_to_pkey(const struct sshkey *k, EVP_PKEY *pkey)
++{
++	return EVP_PKEY_set1_EC_KEY(pkey, k->ecdsa);
++}
++
++static const struct ecgost_info *
++ecgost_info_from_key(const EVP_PKEY *pkey)
++{
++	int algo = EVP_PKEY_id(pkey);
++	const struct ecgost_info *p;
++	const EC_GROUP *g;
++	EC_GROUP *e;
++	int ok;
++
++	for (p = ecgost_info; p->type != NULL; ++p) {
++		if (p->algo != algo)
++			continue;
++
++		g = EC_KEY_get0_group(EVP_PKEY_get0(pkey));
++
++		if (p->curve == EC_GROUP_get_curve_name(g))
++			return p;
++
++		if ((e = EC_GROUP_new_by_curve_name(p->curve)) == NULL)
++			return NULL;
++
++		ok = EC_GROUP_cmp(g, e, NULL) == 0;
++		EC_GROUP_free(e);
++
++		if (ok)
++			return p;
++	}
++
++	return NULL;
++}
++
++int
++ssh_ecgost_private_from_pkey(EVP_PKEY *pkey, struct sshkey *res)
++{
++	const struct ecgost_info *info;
++	EC_KEY *key;
++
++	if (!ssh_ecgost_is_empty(res) ||
++	    (info = ecgost_info_from_key(pkey)) == NULL)
++		return 0;
++
++	key = EVP_PKEY_get0(pkey);
++
++	if (sshkey_ec_validate_public(EC_KEY_get0_group(key),
++				      EC_KEY_get0_public_key(key)) != 0 ||
++	    sshkey_ec_validate_private(key) != 0)
++		return 0;
++
++	EC_KEY_up_ref(key);
++
++	return ssh_ecgost_init(res, key, info) == 0;
++}
++
++static EVP_PKEY *
++ssh_ecgost_get_pkey(const struct sshkey *k)
++{
++	EVP_PKEY *key;
++
++	if ((key = EVP_PKEY_new()) == NULL)
++		return NULL;
++
++	if (ssh_ecgost_private_to_pkey(k, key))
++		return key;
++
++	EVP_PKEY_free(key);
++	return NULL;
++}
++
++int
++ssh_ecgost_sign(const struct sshkey *k, u_char **sig, size_t *siglen,
++		const u_char *data, size_t size, unsigned compat)
++{
++	const struct ecgost_info *info = k->info;
++	EVP_PKEY *key;
++	unsigned char buf[EVP_MAX_MD_SIZE * 2];  /* EVP_PKEY_size */
++	size_t len;
++	int ok;
++	struct sshbuf *b;
++	int r;
++
++	if ((key = ssh_ecgost_get_pkey(k)) == NULL)
++		return SSH_ERR_ALLOC_FAIL;
++
++	ok = (len = evp_sign(key, data, size, buf, sizeof (buf))) > 0;
++	EVP_PKEY_free(key);
++
++	if (!ok)
++		return SSH_ERR_LIBCRYPTO_ERROR;
++
++	if ((b = sshbuf_new()) == NULL)
++		return SSH_ERR_ALLOC_FAIL;
++
++	if ((r = sshbuf_put_cstring(b, info->type)) != 0 ||
++	    (r = sshbuf_put_string (b, buf, len))   != 0)
++		goto error;
++
++	len = sshbuf_len(b);
++
++	if (siglen != NULL)
++		*siglen = len;
++
++	if (sig != NULL) {
++		if ((*sig = malloc(len)) == NULL) {
++			r = SSH_ERR_ALLOC_FAIL;
++			goto error;
++		}
++
++		memcpy(*sig, sshbuf_ptr(b), len);
++	}
++
++	sshbuf_free(b);
++	return 0;
++error:
++	sshbuf_free(b);
++	return r;
++}
++
++int
++ssh_ecgost_verify(const struct sshkey *k, const u_char *sig, size_t siglen,
++		  const u_char *data, size_t size, unsigned compat)
++{
++	const struct ecgost_info *info = k->info;
++	EVP_PKEY *key;
++	int r = 0;
++
++	struct sshbuf *b = NULL;
++	char *type = NULL;
++	unsigned char *sigdata;
++	size_t len;
++
++	if ((key = ssh_ecgost_get_pkey(k)) == NULL)
++		return SSH_ERR_ALLOC_FAIL;
++
++	if ((b = sshbuf_from(sig, siglen)) == NULL) {
++		r = SSH_ERR_ALLOC_FAIL;
++		goto out;
++	}
++
++	if ((r = sshbuf_get_cstring(b, &type, NULL)) != 0)
++		goto out;
++
++	if (strcmp(type, info->type) != 0) {
++		r = SSH_ERR_KEY_TYPE_MISMATCH;
++		goto out;
++	}
++
++	if ((r = sshbuf_get_string(b, &sigdata, &len)) != 0)
++		goto out;
++
++	if (!evp_verify(key, data, size, sigdata, len))
++		r = SSH_ERR_SIGNATURE_INVALID;
++
++	free(sigdata);
++out:
++	free(type);
++	sshbuf_free(b);
++	EVP_PKEY_free(key);
++	return r;
++}
++
++#endif  /* WITH_OPENSSL and OPENSSL_HAS_ECC */
+diff --git a/ssh-ecgost.h b/ssh-ecgost.h
+new file mode 100644
+index 0000000..d636796
+--- /dev/null
++++ b/ssh-ecgost.h
+@@ -0,0 +1,44 @@
++/*
++ * GOST Elliptic Curve Digital Signature
++ *
++ * Copyright (c) 2011-2020 Alexei A. Smekalkine <ikle@ikle.ru>
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ */
++
++#ifndef SSH_ECGOST_H
++#define SSH_ECGOST_H  1
++
++#include <openssl/evp.h>
++
++#include "sshbuf.h"
++
++struct sshkey;
++
++unsigned ssh_ecgost_name_to_bits(const char *type);
++unsigned ssh_ecgost_key_size(const struct sshkey *k);
++int ssh_ecgost_equal_public(const struct sshkey *a, const struct sshkey *b);
++
++int sshbuf_put_ecgost(struct sshbuf *b, const struct sshkey *k,
++		      int header, int priv);
++int sshbuf_get_ecgost(struct sshbuf *b, const char *type, int priv,
++		      struct sshkey *res);
++
++int ssh_ecgost_get_public_key(const struct sshkey *k, struct sshkey *res);
++int ssh_ecgost_generate_private_key(unsigned bits, struct sshkey *res);
++
++int ssh_ecgost_public_to_pem(const struct sshkey *k, FILE *to);
++int ssh_ecgost_private_to_pem(const struct sshkey *k, FILE *to);
++
++int ssh_ecgost_private_to_pem_bio(const struct sshkey *k,
++				  const EVP_CIPHER *cipher,
++				  const void *passphrase, size_t len, BIO *bio);
++int ssh_ecgost_private_to_pkey(const struct sshkey *k, EVP_PKEY *pkey);
++int ssh_ecgost_private_from_pkey(EVP_PKEY *pkey, struct sshkey *res);
++
++int ssh_ecgost_sign(const struct sshkey *k, u_char **sign, size_t *len,
++		    const u_char *data, size_t size, unsigned compat);
++int ssh_ecgost_verify(const struct sshkey *k, const u_char *sig, size_t len,
++		      const u_char *data, size_t size, unsigned compat);
++
++#endif  /* SSH_ECGOST_H */
+diff --git a/sshkey.h b/sshkey.h
+index dc1c105..6cd4626 100644
+--- a/sshkey.h
++++ b/sshkey.h
+@@ -152,6 +152,8 @@ struct sshkey {
+ 	size_t	shielded_len;
+ 	u_char	*shield_prekey;
+ 	size_t	shield_prekey_len;
++	/* Generic fields */
++	const void *info;	/* key-specific constant info */
+ };
+ 
+ #define	ED25519_SK_SZ	crypto_sign_ed25519_SECRETKEYBYTES
+-- 
+2.11.0
+
