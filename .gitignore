@@ -36,3 +36,16 @@ sshd
 tags
 
 *.swp
+debian/*.log
+debian/*.debhelper
+debian/*.substvars
+debian/numa-*
+debian/files
+debian/tmp
+debian/build-deb
+debian/autoreconf.after
+debian/autoreconf.before
+
+config.guess
+config.sub
+install-sh
