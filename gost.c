@@ -64,9 +64,18 @@ no_ctx:
 	return NULL;
 }
 
-DEFINE_CIPHER(kuznechik_cbc, "grasshopper-cbc")
-DEFINE_CIPHER(kuznechik_cfb, "grasshopper-cfb")
-DEFINE_CIPHER(kuznechik_ctr, "grasshopper-ctr")
-DEFINE_CIPHER(kuznechik_ofb, "grasshopper-ofb")
+#define DEFINE_CIPHER2(name, algo1, algo2)			\
+const EVP_CIPHER *						\
+EVP_##name(void)						\
+{								\
+	const EVP_CIPHER *c = EVP_get_cipherbyname (algo1);	\
+								\
+	return c != NULL ? c : EVP_get_cipherbyname(algo2);	\
+}
+
+DEFINE_CIPHER2(kuznechik_cbc, "grasshopper-cbc", "kuznyechik-cbc")
+DEFINE_CIPHER2(kuznechik_cfb, "grasshopper-cfb", "kuznyechik-cfb")
+DEFINE_CIPHER2(kuznechik_ctr, "grasshopper-ctr", "kuznyechik-ctr")
+DEFINE_CIPHER2(kuznechik_ofb, "grasshopper-ofb", "kuznyechik-ofb")
 
 #endif  /* WITH_OPENSSL */
