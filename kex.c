@@ -167,7 +167,7 @@ kex_alg_available(const struct kexalg *k)
 	EC_KEY *key;
 
 	if (k->ec_nid > 0) {
-		key = EC_KEY_new_by_curve_name_ex(k->key_alg, k->ec_nid);
+		key = EC_KEY_new_by_curve_name_ng(k->key_alg, k->ec_nid);
 		if (key == NULL)
 			return 0;
 

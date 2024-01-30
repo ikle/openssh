@@ -187,7 +187,7 @@ sshbuf_get_ecgost(struct sshbuf *b, const char *type, int priv,
 	if ((info = ecgost_get_info(type)) == NULL)
 		return SSH_ERR_INVALID_FORMAT;
 
-	if ((key = EC_KEY_new_by_curve_name_ex(info->algo, info->curve)) == NULL)
+	if ((key = EC_KEY_new_by_curve_name_ng(info->algo, info->curve)) == NULL)
 		return SSH_ERR_EC_CURVE_INVALID;
 
 	if ((r = sshbuf_get_eckey(b, key)) != 0)
@@ -217,7 +217,7 @@ ssh_ecgost_get_public_key(const struct sshkey *k, struct sshkey *res)
 	if (!ssh_ecgost_is_empty(res))
 		return SSH_ERR_INVALID_ARGUMENT;
 
-	if ((key = EC_KEY_new_by_curve_name_ex(info->algo, info->curve)) == NULL)
+	if ((key = EC_KEY_new_by_curve_name_ng(info->algo, info->curve)) == NULL)
 		return SSH_ERR_EC_CURVE_INVALID;
 
 	if (EC_KEY_set_public_key(key, EC_KEY_get0_public_key(k->ecdsa)) != 1)

@@ -56,7 +56,7 @@ kex_ecdh_keypair(struct kex *kex)
 	struct sshbuf *buf = NULL;
 	int r;
 
-	client_key = EC_KEY_new_by_curve_name_ex(kex->key_alg, kex->ec_nid);
+	client_key = EC_KEY_new_by_curve_name_ng(kex->key_alg, kex->ec_nid);
 	if (client_key == NULL) {
 		r = SSH_ERR_ALLOC_FAIL;
 		goto out;
@@ -103,7 +103,7 @@ kex_ecdh_enc(struct kex *kex, const struct sshbuf *client_blob,
 	*server_blobp = NULL;
 	*shared_secretp = NULL;
 
-	server_key = EC_KEY_new_by_curve_name_ex(kex->key_alg, kex->ec_nid);
+	server_key = EC_KEY_new_by_curve_name_ng(kex->key_alg, kex->ec_nid);
 	if (server_key == NULL) {
 		r = SSH_ERR_ALLOC_FAIL;
 		goto out;

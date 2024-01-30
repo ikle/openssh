@@ -67,7 +67,7 @@ evp_verify(EVP_PKEY *key, const void *data, size_t size,
  * Creates Elliptic Curve key for specified algorithm nid and curve nid
  */
 EC_KEY *
-EC_KEY_new_by_curve_name_ex(int algo, int curve)
+EC_KEY_new_by_curve_name_ng(int algo, int curve)
 {
 	EVP_PKEY_CTX *c;
 	EVP_PKEY *pkey = NULL;
