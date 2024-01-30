@@ -503,7 +503,7 @@ regress-prep:
 	$(MKDIR_P) `pwd`/regress/misc/kexfuzz
 	$(MKDIR_P) `pwd`/regress/misc/sk-dummy
 	[ -f `pwd`/regress/Makefile ] || \
-	    ln -s `cd $(srcdir) && pwd`/regress/Makefile `pwd`/regress/Makefile
+	    ln -sf `cd $(srcdir) && pwd`/regress/Makefile `pwd`/regress/Makefile
 
 REGRESSLIBS=libssh.a $(LIBCOMPAT)
 
