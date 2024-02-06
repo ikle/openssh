@@ -716,6 +716,7 @@ get_hostkey_by_type(int type, int nid, int need_private, struct ssh *ssh)
 		case KEY_ECDSA_SK:
 		case KEY_ECDSA_CERT:
 		case KEY_ECDSA_SK_CERT:
+		case KEY_ECGOST:
 			if (key->ecdsa_nid != nid)
 				continue;
 			/* FALLTHROUGH */

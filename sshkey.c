@@ -137,15 +137,29 @@ static const struct keytype keytypes[] = {
 	{ "webauthn-sk-ecdsa-sha2-nistp256@openssh.com", "ECDSA-SK", NULL,
 	    KEY_ECDSA_SK, NID_X9_62_prime256v1, 0, 1 },
 
-	{ "ssh-gost2012-256-cpa", "GOST2012-256", NULL, KEY_ECGOST, 0, 0, 0 },
-	{ "ssh-gost2012-256-cpb", "GOST2012-256", NULL, KEY_ECGOST, 0, 0, 0 },
-	{ "ssh-gost2012-256-cpc", "GOST2012-256", NULL, KEY_ECGOST, 0, 0, 0 },
+#ifdef NID_id_GostR3410_2012_256
+	{ "ssh-gost2012-256-cpa", "GOST2012-256", NULL,
+	    KEY_ECGOST, NID_id_GostR3410_2001_CryptoPro_A_ParamSet, 0, 0 },
+	{ "ssh-gost2012-256-cpb", "GOST2012-256", NULL,
+	    KEY_ECGOST, NID_id_GostR3410_2001_CryptoPro_B_ParamSet, 0, 0 },
+	{ "ssh-gost2012-256-cpc", "GOST2012-256", NULL,
+	    KEY_ECGOST, NID_id_GostR3410_2001_CryptoPro_C_ParamSet, 0, 0 },
+#endif
+#ifdef NID_id_tc26_gost_3410_2012_512_paramSetA
+	{ "ssh-gost2012-512-tc26a", "GOST2012-512", NULL,
+	    KEY_ECGOST, NID_id_tc26_gost_3410_2012_512_paramSetA, 0, 0 },
+	{ "ssh-gost2012-512-tc26b", "GOST2012-512", NULL,
+	    KEY_ECGOST, NID_id_tc26_gost_3410_2012_512_paramSetB, 0, 0 },
+#endif
 
-	{ "ssh-gost2012-512-tc26a", "GOST2012-512", NULL, KEY_ECGOST, 0, 0, 0 },
-	{ "ssh-gost2012-512-tc26b", "GOST2012-512", NULL, KEY_ECGOST, 0, 0, 0 },
-
-	{ "ssh-gost2001-cpa", "GOST2001", NULL, KEY_ECGOST, 0, 0, 0 },
-	{ "ssh-gost2001-cc",  "GOST2001", NULL, KEY_ECGOST, 0, 0, 0 },
+#ifdef NID_id_GostR3410_2001_CryptoPro_A_ParamSet
+	{ "ssh-gost2001-cpa", "GOST2001", NULL,
+	    KEY_ECGOST, NID_id_GostR3410_2001_CryptoPro_A_ParamSet, 0, 0 },
+#endif
+#ifdef NID_id_GostR3410_2001_ParamSet_cc
+	{ "ssh-gost2001-cc",  "GOST2001", NULL,
+	    KEY_ECGOST, NID_id_GostR3410_2001_ParamSet_cc, 0, 0 },
+#endif
 
 # endif /* OPENSSL_HAS_ECC */
 	{ "ssh-rsa-cert-v01@openssh.com", "RSA-CERT", NULL,
@@ -1473,8 +1487,10 @@ sshkey_read(struct sshkey *ret, char **cpp)
 	case KEY_ECGOST:
 		EC_KEY_free(ret->ecdsa);
 		ret->ecdsa = k->ecdsa;
+		ret->ecdsa_nid = k->ecdsa_nid;
 		ret->info  = k->info;
 		k->ecdsa = NULL;
+		k->ecdsa_nid = -1;
 		k->info  = NULL;
 #ifdef DEBUG_PK
 		sshkey_dump_ec_key(ret->ecdsa);

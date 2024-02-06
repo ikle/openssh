@@ -84,9 +84,10 @@ ecgost_find_info(int key_size)
 static int
 ssh_ecgost_init(struct sshkey *k, EC_KEY *key, const struct ecgost_info *info)
 {
-	k->type  = KEY_ECGOST;
-	k->ecdsa = key;
-	k->info  = info;
+	k->type      = KEY_ECGOST;
+	k->ecdsa     = key;
+	k->ecdsa_nid = info->curve;
+	k->info      = info;
 	return 0;
 }
 

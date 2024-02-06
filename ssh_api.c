@@ -470,12 +470,13 @@ struct sshkey *
 _ssh_host_public_key(int type, int nid, struct ssh *ssh)
 {
 	struct key_entry *k;
+	const int want_nid = (type == KEY_ECDSA || type == KEY_ECGOST);
 
 	debug3("%s: need %d", __func__, type);
 	TAILQ_FOREACH(k, &ssh->public_keys, next) {
 		debug3("%s: check %s", __func__, sshkey_type(k->key));
 		if (k->key->type == type &&
-		    (type != KEY_ECDSA || k->key->ecdsa_nid == nid))
+		    (!want_nid || k->key->ecdsa_nid == nid))
 			return (k->key);
 	}
 	return (NULL);
@@ -485,12 +486,13 @@ struct sshkey *
 _ssh_host_private_key(int type, int nid, struct ssh *ssh)
 {
 	struct key_entry *k;
+	const int want_nid = (type == KEY_ECDSA || type == KEY_ECGOST);
 
 	debug3("%s: need %d", __func__, type);
 	TAILQ_FOREACH(k, &ssh->private_keys, next) {
 		debug3("%s: check %s", __func__, sshkey_type(k->key));
 		if (k->key->type == type &&
-		    (type != KEY_ECDSA || k->key->ecdsa_nid == nid))
+		    (!want_nid || k->key->ecdsa_nid == nid))
 			return (k->key);
 	}
 	return (NULL);
