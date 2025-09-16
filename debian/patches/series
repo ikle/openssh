@@ -35,3 +35,6 @@ oe-06-Add-GOST-Elliptic-Curve-Digital-Signature-helpers.patch
 oe-07-Add-support-for-GOST-EC-keys.patch
 oe-08-Add-support-for-GOST-EC-key-exchange.patch
 numa-01-config-path.patch
+oe-09-fix-double-free.patch
+oe-10-openbsd-compat-fix-build.patch
+oe-11-configure-support-build-for-ossl-3.5.patch

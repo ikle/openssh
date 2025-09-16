@@ -1,3 +1,11 @@
+numa-openssh (1:8.4p1-5+numa4) unstable; urgency=medium
+
+  * sshsig: fix double free
+  * openbsd-compat: add forgotten header file inclusion
+  * configure: support build for ossl 3.5
+
+ -- Alexei A Smekalkine <ikle@ikle.ru>  Tue, 16 Sep 2024 19:47:59 +0300
+
 numa-openssh (1:8.4p1-5+numa3) unstable; urgency=medium
 
   * gost: allow to specify alternative name for ciphers

@@ -1,0 +1,24 @@
+From 1165e75d1f97002ff9d15af79eeee1e57c39d0b0 Mon Sep 17 00:00:00 2001
+From: "Alexei A. Smekalkine" <smekalkin@numatech.ru>
+Date: Tue, 16 Sep 2025 14:07:09 +0300
+Subject: [PATCH 1/2] openbsd-compat: add forgotten header file inclusion
+
+---
+ openbsd-compat/bindresvport.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/openbsd-compat/bindresvport.c b/openbsd-compat/bindresvport.c
+index eeb269d..346c7fe 100644
+--- a/openbsd-compat/bindresvport.c
++++ b/openbsd-compat/bindresvport.c
+@@ -40,6 +40,7 @@
+ #include <arpa/inet.h>
+ 
+ #include <errno.h>
++#include <stdlib.h>
+ #include <string.h>
+ 
+ #define STARTPORT 600
+-- 
+2.39.5
+

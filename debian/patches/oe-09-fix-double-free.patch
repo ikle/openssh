@@ -1,0 +1,16 @@
+This bug was found using statical code analysis. It fixed upstream
+but their patch contains noise. The problem is ssh_digest_free called
+twice here and after "out" mark, remove this call and prevent
+double free.
+
+--- a/sshsig.c
++++ b/sshsig.c
+@@ -517,7 +517,6 @@ hash_file(int fd, const char *hashalg, struct sshbuf **bp)
+ 				continue;
+ 			oerrno = errno;
+ 			error("%s: read: %s", __func__, strerror(errno));
+-			ssh_digest_free(ctx);
+ 			errno = oerrno;
+ 			r = SSH_ERR_SYSTEM_ERROR;
+ 			goto out;
+
